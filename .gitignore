@@ -1,0 +1,19 @@
+# ── 运行时产物（每个部署自己生成，别提交）──
+monopoly-state.json          # CLI 单机存档
+monopoly-games/              # 托管 API：每局存档
+monopoly-seen/               # 跨局去重记忆
+monopoly-swap-log.jsonl      # 换卡日志
+monopoly-admin.key           # 若自建加了管理鉴权
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── 备份/临时 ──
+*.bak
+*.bak.*
+pending_*.json
+*.tmp

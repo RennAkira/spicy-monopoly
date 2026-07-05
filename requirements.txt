@@ -1,0 +1,5 @@
+# 引擎(monopoly_play.py)本身零第三方依赖，只用 Python 标准库。
+# 下面这些只有跑托管 API 服务(monopoly_api.py)时才需要：
+fastapi
+uvicorn
+pydantic
