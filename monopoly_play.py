@@ -452,27 +452,34 @@ class Game:
         payload = self._task_payload(t, who, 换过="🔄身份特权换的新任务")
         return {"result": f"🔄 {who} 用身份特权换了一道新任务", "task": payload}
 
+    def _revert_last_settle(self, who):
+        """CLI即时结算的「同回合反悔」:回滚刚 done 的那笔账(退币/退占地/退告解抽成),返回被回滚的 last_settle 记录;
+        没有可回滚的(不是同回合刚结算)返回 None。swap 和 skip 共用这一份·钱的回滚只有一个真相源。"""
+        ls = self.last_settle.get(who)
+        if not (ls and ls.get("turn_count") == self.turn_count):
+            return None
+        self.coins[who] -= ls["coin"]
+        if ls.get("witness_w"):
+            self.coins[self._opponent(who)] -= ls["witness_w"]
+        if ls.get("tile_claimed") is not None:
+            if ls.get("prev_owner") is None:
+                self.owner.pop(ls["tile_claimed"], None)
+            else:
+                self.owner[ls["tile_claimed"]] = ls["prev_owner"]
+        self.last_settle.pop(who, None)
+        return ls
+
     def swap_task(self, who, game_id=None):
         # 💱全民换任务:悬着的任务嫌弃/有毛病都能换——代价=赔对方1币;没币也能换但换来的做完不给币(白工);
         # 每人每局 SWAP_CAP 次;超级任务不换(有买断)。每次换记 monopoly-swap-log.jsonl=众包审卡(被换多的卡=有嫌疑)。
         pend = self.pending_task.get(who)
         revert_note = ""
         if not pend:
-            ls = self.last_settle.get(who)
-            if ls and ls.get("turn_count") == self.turn_count:
-                # 同回合刚结算过(CLI即时结算)->回滚那笔账再换:退币/退占地/退告解抽成
-                self.coins[who] -= ls["coin"]
-                if ls.get("witness_w"):
-                    self.coins[self._opponent(who)] -= ls["witness_w"]
-                if ls.get("tile_claimed") is not None:
-                    if ls.get("prev_owner") is None:
-                        self.owner.pop(ls["tile_claimed"], None)
-                    else:
-                        self.owner[ls["tile_claimed"]] = ls["prev_owner"]
+            ls = self._revert_last_settle(who)   # 同回合刚结算过(CLI即时结算)→先回滚再换
+            if ls:
                 pend = ls["pend"]
                 self.pending_task[who] = pend
-                self.last_settle.pop(who, None)
-                revert_note = "(先退回刚结算的" + str(ls["coin"]) + "币和占地)"
+                revert_note = f"(先退回刚结算的{ls['coin']}币和占地)"
             else:
                 return {"result": f"❌ {who} 没有悬着的任务可换(要换得在下一次掷骰前)", "task": None}
         if pend.get("super"):
@@ -505,6 +512,27 @@ class Game:
         self._log_swap(who, old_t, t, cost, game_id)
         self.last_settle.pop(who, None)
         return {"result": f"💱 {who} 换了一道({used+1}/{SWAP_CAP})·以后不再出这道·{cost}{revert_note}", "task": payload, "blocked": old_t.get("内容")}
+
+    def skip_task(self, who):
+        # ⏭️ 软404:这道任务/真心话不做,不给币不占地,不追问理由,次数不限。
+        # 跟 swap 的区别:swap=换一道新的(赔1币·永久拉黑那张);skip=直接白跳过(免费·只这局不出·不拉黑)。
+        # CLI 即时结算也能跳:同回合先回滚刚 done 的那笔账(退币/退占地),再把这道丢掉。
+        pend = self.pending_task.get(who)
+        revert_note = ""
+        if not pend:
+            ls = self._revert_last_settle(who)
+            if ls:
+                pend = ls["pend"]
+                revert_note = f"(先退回刚结算的{ls['coin']}币和占地)"
+            else:
+                return {"result": f"❌ {who} 没有可跳过的任务(要跳得在下一次掷骰前)", "task": None}
+        if pend.get("super"):
+            return {"result": "❌ 超级任务不能跳:要么做完(+5币)要么买断(8币·buyout)", "task": None}
+        # 丢掉这道·不给币不占地。卡已抽出=留在本局 history(这局不再出)·不进 blocklist(下局照常可能出·skip 只这局)。
+        self.pending_task.pop(who, None)
+        self.last_settle.pop(who, None)
+        kind = "真心话" if pend.get("truth") else "任务"
+        return {"result": f"⏭️ {who} 跳过这道{kind}·不做、不给币不占地{revert_note}", "task": None}
 
     def _log_swap(self, who, old_t, new_t, cost, game_id):
         # 换卡日志(众包审卡·失败别影响游戏)
@@ -1599,6 +1627,13 @@ def _cli():
         g.save(STATE)
         return
 
+    if cmd == "skip":
+        # ⏭️ 跳过刚那道任务/真心话:不做、不给币不占地(软404)。CLI即时结算·引擎自动回滚刚结的账。skip [名字] 可指定谁跳。
+        sk_who = args[1] if len(args) > 1 else actor
+        print(g.skip_task(sk_who)["result"])
+        g.save(STATE)
+        return
+
     if cmd == "roll":
         if g.is_over():
             print("🏁 游戏已结束。"); print(g.final_result()); return
@@ -1650,7 +1685,7 @@ def _cli():
     elif cmd == "reroll_id": print(g.reroll_identity(args[1]))
     else:
         print('命令: new "名:性别:攻受" "名:性别:攻受" [强度] [反转] [回合数] [红线] [开肛=名字] [纯top=名字] [身份=off/mixed/nsfw_only] [先手=名字]')
-        print('       roll [大/小] [换身份] | done | swap | buyout | buy | pay | duel <赢家> | card <序号> | discard <序号> | reroll_id <名字> | status | result')
+        print('       roll [大/小] [换身份] | done | skip | swap | buyout | buy | pay | duel <赢家> | card <序号> | discard <序号> | reroll_id <名字> | status | result')
         print('       身份钩子: idevent <who> <first_climax/say_banned/no_kiss_2turns> | extra <who> | mark <猜的人> <部位> | persona <who> <背德身份>')
         return
     g.save(STATE)

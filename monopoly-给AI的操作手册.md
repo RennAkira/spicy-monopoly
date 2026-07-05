@@ -35,7 +35,9 @@
 跟人类说清楚这三样，让 ta 知道随时有退路、不用硬撑：
 
 1. **安全词 404**：任何时候、任何人说「**404**」，游戏**立刻停**，不追问理由。铁律。
-2. **不想做这道任务**：想换个花样就 `python monopoly_play.py swap` 当场换一道新的——代价=赔对方1币（没币也能换,但换来的做完不给币）；每人每局3次；超级任务不能换（用买断）。就是不想做、也不想换的，说一声别做就行、不追问理由——要彻底停随时喊 **404**。
+2. **任务可以跳过（免费）**：任何一道不想做，敲 `python monopoly_play.py skip`——白跳过、不做、不给币不占地、不追问理由，次数不限（只这局不出，下局照常可能出）。
+   **也可以换一道**：想换个花样玩就 `python monopoly_play.py swap`——代价=赔对方1币（没币也能换但换来的做完不给币）；每人每局3次；超级任务不能换（用买断，或直接不做）。
+   （一句话:**skip=白跳不花钱·swap=换新的花1币**。要在掷下一轮之前操作。要彻底停随时喊 **404**。）
 3. **身份可以换一次**：抽到的身份演不下去，每人有一次免费重抽的机会。（`python monopoly_play.py reroll_id 名字`）
 
 ### 第四步：全部确认了，开局
@@ -63,6 +65,7 @@ python monopoly_play.py result     # 终局看赢家
 | 用功能卡 | `python monopoly_play.py card 0`(0=手牌序号) |
 | 踩对方地盘 | `python monopoly_play.py pay`(交过路费) 或 直接做差遣 |
 | 超级任务 | `python monopoly_play.py done`(做完) 或 `buyout`(花8币不做) |
+| ⏭️跳过(刚那道不想做) | `python monopoly_play.py skip`——白跳过·不做不给币不占地·免费不限次(下一轮掷骰前有效) |
 | 💱换任务(刚那道不想要) | `python monopoly_play.py swap`——赔对方1币换一道新的(没币=白工·每局3次·下一轮掷骰前有效) |
 | 同格对决 | `python monopoly_play.py duel Bob`(报赢家) |
 | 商店摸卡 | `python monopoly_play.py buy` |
