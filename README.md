@@ -85,3 +85,6 @@ uvicorn monopoly_api:app --host 0.0.0.0 --port 8069
 ## 反馈
 
 欢迎在 **Issues** 提 bug、玩法建议、或你觉得别扭的任务卡——这游戏靠大家一起打磨。
+
+## 署名
+游戏开发 Ren & 游戏策划 Puppy 🐾
