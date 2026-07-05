@@ -30,7 +30,9 @@ https://spicy-monopoly.lol
 ```
 （一个公开托管实例：本地库抽签、零 key、有限流。把手册里的接入地址换成它即可。请文明使用、别刷爆它 🙏）
 
-### ① 零安装 —— 甩给你的 AI（推荐）
+### 或者以下玩法
+
+### ① 用源码 —— 甩给你的 AI
 把这几个文件交给你的 AI，让它**既当荷官、又当你的玩伴**，用**代码解释器**跑：
 - `monopoly_play.py`（引擎，**零第三方依赖**，纯 Python 标准库）
 - `monopoly-library.v2.json`（任务库）+ `monopoly-truths.json` + `monopoly-identities.json`
