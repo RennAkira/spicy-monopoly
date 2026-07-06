@@ -88,8 +88,86 @@ function normalizeLineup(value) {
   return value;
 }
 
+const argAliases = {
+  gameid: "game_id",
+  game_id: "game_id",
+  playertoken: "player_token",
+  player_token: "player_token",
+  p1name: "p1_name",
+  p1_name: "p1_name",
+  p1sex: "p1_sex",
+  p1_sex: "p1_sex",
+  p1role: "p1_role",
+  p1_role: "p1_role",
+  p2name: "p2_name",
+  p2_name: "p2_name",
+  p2sex: "p2_sex",
+  p2_sex: "p2_sex",
+  p2role: "p2_role",
+  p2_role: "p2_role",
+  paircode: "pair_code",
+  pair_code: "pair_code",
+  firstplayer: "first_player",
+  first_player: "first_player",
+  setupconfirmed: "setup_confirmed",
+  setup_confirmed: "setup_confirmed",
+};
+
+function aliasKey(key) {
+  const normalized = String(key).replace(/[\s_-]+/g, "").toLowerCase();
+  return argAliases[normalized] || key;
+}
+
+function normalizeQuery(value) {
+  const normalized = String(value || "").trim().replace(/^\/+/, "").toLowerCase().replace(/[\s_-]+/g, "");
+  const aliases = {
+    state: "state",
+    status: "state",
+    shop: "shop",
+    list: "list_games",
+    games: "list_games",
+    listgame: "list_games",
+    listgames: "list_games",
+    pairhistory: "pair_history",
+    history: "pair_history",
+  };
+  return aliases[normalized] || value;
+}
+
+function normalizeAction(value) {
+  const normalized = String(value || "").trim().replace(/^\/+/, "").toLowerCase().replace(/[\s_-]+/g, "");
+  const aliases = {
+    finalresult: "final_result",
+    skip: "skip",
+    swap: "swap",
+    done: "done",
+    paytoll: "pay_toll",
+    duelresult: "duel_result",
+    buyout: "buyout_super",
+    buyoutsuper: "buyout_super",
+    buycard: "buy_card",
+    usecard: "use_card",
+    discard: "discard_card",
+    discardcard: "discard_card",
+    buy: "buy_collectible",
+    buycollectible: "buy_collectible",
+    rerollidentity: "reroll_identity",
+    rerolltask: "reroll_task",
+    extratask: "extra_task",
+    guessmark: "guess_mark",
+    declarepersona: "declare_persona",
+    idevent: "id_event",
+  };
+  return aliases[normalized] || value;
+}
+
 function normalizeToolArgs(args) {
-  const normalized = { ...args };
+  const normalized = {};
+  for (const [key, value] of Object.entries(args || {})) {
+    const canonicalKey = aliasKey(key);
+    if (isBlank(value) && !isBlank(normalized[canonicalKey])) continue;
+    normalized[canonicalKey] = value;
+  }
   for (const key of ["p1_sex", "p2_sex"]) {
     if (normalized[key] !== undefined) normalized[key] = normalizeSex(normalized[key]);
   }
@@ -97,6 +175,8 @@ function normalizeToolArgs(args) {
     if (normalized[key] !== undefined) normalized[key] = normalizeRole(normalized[key]);
   }
   if (normalized.lineup !== undefined) normalized.lineup = normalizeLineup(normalized.lineup);
+  if (normalized.query !== undefined) normalized.query = normalizeQuery(normalized.query);
+  if (normalized.action !== undefined) normalized.action = normalizeAction(normalized.action);
   return normalized;
 }
 
@@ -247,7 +327,7 @@ function slimData(data, context = {}) {
 
   const slim = {};
   const copyKeys = [
-    "ok", "msg", "logged", "muted",
+    "ok", "error", "msg", "logged", "muted",
     "game_id", "player_token", "who", "say", "settled",
     "result", "history_note", "active_limits",
     "action_needed", "hint", "next_turn", "identity_reminder",
@@ -301,13 +381,16 @@ function result(data, context = {}) {
 }
 
 function errorResult(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const structuredContent = compact({
+    ok: false,
+    error: message,
+    ...(error?.structuredContent && typeof error.structuredContent === "object" ? error.structuredContent : {}),
+  });
   const response = {
-    isError: true,
-    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+    content: [{ type: "text", text: readable(structuredContent) }],
+    structuredContent,
   };
-  if (error?.structuredContent && typeof error.structuredContent === "object") {
-    response.structuredContent = error.structuredContent;
-  }
   return response;
 }
 
@@ -326,6 +409,8 @@ function registerSpicyMonopoly(server) {
 const strArray = z.array(z.string()).default([]);
 const playerName = z.string().min(1);
 const gameId = z.string().optional().describe("Required after new_game. Must be the exact game_id returned by new_game; do not invent one.");
+const gameIdAlias = z.string().optional().describe("Alias for game_id. Prefer game_id when possible.");
+const playerTokenAlias = z.string().optional().describe("Alias for player_token. Prefer player_token when possible.");
 const who = z.string().min(1).describe("Exact player name as used in new_game.");
 const sexInput = z.string()
   .describe("Allowed: 男 or 女. Also accepts male/female/m/f/man/woman/boy/girl and converts to 男/女.");
@@ -465,6 +550,12 @@ tool("new_game", {
     p2_role: roleInput.default("受"),
     p1_color: z.string().default("🔵").describe("Short display marker for player 1."),
     p2_color: z.string().default("🔴").describe("Short display marker for player 2."),
+    p1name: z.string().optional().describe("Alias for p1_name."),
+    p1sex: sexInput.optional().describe("Alias for p1_sex."),
+    p1role: roleInput.optional().describe("Alias for p1_role."),
+    p2name: z.string().optional().describe("Alias for p2_name."),
+    p2sex: sexInput.optional().describe("Alias for p2_sex."),
+    p2role: roleInput.optional().describe("Alias for p2_role."),
     redline: strArray.describe("String array of excluded topics/terms. Keep empty unless players specify limits."),
     no_receive_anal: strArray.describe("String array of exact player names who must not receive this category. Legacy; defaults off unless opened."),
     open_anal: strArray.describe("String array of exact player names who explicitly allow this category. Empty means off for both players."),
@@ -474,10 +565,14 @@ tool("new_game", {
     identity_mode: z.string().default("mixed").describe("Allowed: off, mixed, nsfw_only. Default mixed."),
     game_length: z.union([z.number(), z.string()]).optional().describe("Optional integer 4-60 total turns."),
     player_token: z.string().optional().describe("Optional owner token for delete/list. Dedup does not rely on it."),
+    playertoken: playerTokenAlias,
     pair_code: z.string().default("").describe("Optional private code to separate common names without changing displayed names."),
+    paircode: z.string().optional().describe("Alias for pair_code."),
     reset_blocklist: z.union([z.boolean(), z.string()]).default(false).describe("Boolean true/false. Usually false."),
     first_player: z.string().default("").describe("Optional exact player name who rolls first."),
+    firstplayer: z.string().optional().describe("Alias for first_player."),
     setup_confirmed: z.union([z.boolean(), z.string()]).default(false).describe("Required gate. Set true only after you explained rules/safety and confirmed setup with players; false/missing returns setup_required instead of starting."),
+    setupconfirmed: z.union([z.boolean(), z.string()]).optional().describe("Alias for setup_confirmed."),
   },
   annotations: { destructiveHint: false, openWorldHint: true },
 }, (args) => {
@@ -513,6 +608,7 @@ tool("roll", {
   description: rollDescription,
   inputSchema: {
     game_id: gameId,
+    gameid: gameIdAlias,
     toll: z.string().optional().describe("Only if previous result asks for toll settlement. Allowed: pay, serve."),
     task: z.string().optional().describe("Only if previous task needs settlement. Allowed: done, skip."),
     super_action: z.string().optional().describe("Only if previous prompt asks. Allowed: done, buyout."),
@@ -528,7 +624,11 @@ tool("roll", {
   oneOf(body, "super_action", superActions);
   oneOf(body, "guess", guesses);
   booleanParam(body, "swap_identity");
-  return request("POST", `/roll/${encodeURIComponent(game_id)}`, body);
+  return request("POST", `/roll/${encodeURIComponent(game_id)}`, body).catch((error) => ({
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+    action_needed: "Use the exact game_id returned by new_game. If you lost it or used an external id, call game_info query=list_games with player_token, or start a new game after setup_confirmed=true.",
+  }));
 });
 
 const pairSchema = {
@@ -545,6 +645,13 @@ const optionalPairSchema = {
   p2_sex: sexInput.optional(),
   pair_code: z.string().default(""),
 };
+const optionalPairAliasSchema = {
+  p1name: z.string().optional().describe("Alias for p1_name."),
+  p1sex: sexInput.optional().describe("Alias for p1_sex."),
+  p2name: z.string().optional().describe("Alias for p2_name."),
+  p2sex: sexInput.optional().describe("Alias for p2_sex."),
+  paircode: z.string().optional().describe("Alias for pair_code."),
+};
 
 function required(args, name) {
   if (args[name] === undefined || args[name] === null || args[name] === "") {
@@ -559,6 +666,7 @@ tool("game_action", {
   inputSchema: {
     action: z.string().describe(`Action to run. Allowed: ${gameActions.join(", ")}.`),
     game_id: gameId,
+    gameid: gameIdAlias,
     who: z.string().optional().describe("Player name, required by most actions."),
     winner: z.string().optional().describe("Winner name for duel_result."),
     index: z.union([z.string(), z.number()]).optional().describe("Card index or name for use_card/discard_card."),
@@ -618,19 +726,45 @@ tool("game_info", {
   inputSchema: {
     query: z.string().describe(`Query to run. Allowed: ${infoQueries.join(", ")}.`),
     game_id: z.string().optional(),
+    gameid: gameIdAlias,
     player_token: z.string().optional(),
+    playertoken: playerTokenAlias,
     ...optionalPairSchema,
+    ...optionalPairAliasSchema,
   },
   annotations: { readOnlyHint: true, openWorldHint: true },
 }, async (args) => {
   oneOf(args, "query", infoQueries, { required: true });
   switch (args.query) {
     case "state":
-      return request("GET", `/state/${encodeURIComponent(required(args, "game_id"))}`);
+      try {
+        return await request("GET", `/state/${encodeURIComponent(required(args, "game_id"))}`);
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          action_needed: "Use the exact game_id returned by new_game. If you do not have one, explain setup, call new_game with setup_confirmed=true, then use that game_id.",
+        };
+      }
     case "shop":
-      return request("GET", `/shop/${encodeURIComponent(required(args, "game_id"))}`);
+      try {
+        return await request("GET", `/shop/${encodeURIComponent(required(args, "game_id"))}`);
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          action_needed: "Use the exact game_id returned by new_game before querying shop.",
+        };
+      }
     case "list_games":
-      return request("GET", "/games", undefined, { token: required(args, "player_token") });
+      if (isBlank(args.player_token)) {
+        return {
+          ok: false,
+          error: "player_token is required for list_games.",
+          action_needed: "Do not use list_games to start a new game. If no player_token is available, call monopoly_help, explain setup, then call new_game with setup_confirmed=true.",
+        };
+      }
+      return request("GET", "/games", undefined, { token: args.player_token });
     case "pair_history": {
       required(args, "p1_name");
       oneOf(args, "p1_sex", sexes, { required: true, hint: "也接受 male/female/m/f，会自动转换。" });
@@ -650,11 +784,14 @@ tool("game_admin", {
   inputSchema: {
     action: z.string().describe(`Admin action. Allowed: ${adminActions.join(", ")}.`),
     game_id: z.string().optional(),
+    gameid: gameIdAlias,
     player_token: z.string().optional(),
+    playertoken: playerTokenAlias,
     text: z.string().optional(),
     kind: z.string().default("feedback"),
     mute: z.union([z.boolean(), z.string()]).default(false),
     ...optionalPairSchema,
+    ...optionalPairAliasSchema,
   },
   annotations: { destructiveHint: true, openWorldHint: true },
 }, async (args) => {
