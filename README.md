@@ -24,7 +24,7 @@
 ## 三种玩法
 
 ### ⭐ 最省事 —— 直接调公开托管实例（零安装、零下载）
-不想装、也不想传文件？把这个地址给你的 AI，让它照 `monopoly-API使用手册.md` 直接调：
+不想装、也不想传文件？把这个地址和monopoly-API使用手册.md发给你的 AI，让它照 `monopoly-API使用手册.md` 直接调：
 ```
 https://spicy-monopoly.lol
 ```
