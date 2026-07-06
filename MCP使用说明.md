@@ -95,6 +95,7 @@ SPICY_MONOPOLY_MCP_HOST=0.0.0.0 PORT=3000 npm run mcp:http
 | `SPICY_MONOPOLY_MCP_PATH` | MCP 路径，默认 `/mcp`。 |
 | `SPICY_MONOPOLY_MCP_ALLOWED_HOSTS` | 可选，逗号分隔的 Host 白名单。 |
 | `SPICY_MONOPOLY_MCP_BEARER_TOKEN` | 可选，设置后远程客户端必须带 `Authorization: Bearer ...`。 |
+| `SPICY_MONOPOLY_MCP_JSON_RESPONSE` | 可选，默认 `true`，远程 MCP 用普通 JSON 响应；设为 `false` 才用 SSE 响应。 |
 | `SPICY_MONOPOLY_BASE_URL` | 可选，默认转发到 `https://spicy-monopoly.lol`；自建 API 时改成自己的 API。 |
 | `SPICY_MONOPOLY_TIMEOUT_MS` | 可选，转发 API 的超时时间，默认 `20000`。 |
 

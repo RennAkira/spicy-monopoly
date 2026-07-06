@@ -20,6 +20,7 @@ const MCP_HOST = process.env.SPICY_MONOPOLY_MCP_HOST || process.env.HOST || "127
 const MCP_PORT = Number.parseInt(process.env.SPICY_MONOPOLY_MCP_PORT || process.env.PORT || "3000", 10);
 const MCP_PATH = process.env.SPICY_MONOPOLY_MCP_PATH || "/mcp";
 const MCP_BEARER_TOKEN = process.env.SPICY_MONOPOLY_MCP_BEARER_TOKEN || "";
+const MCP_ENABLE_JSON_RESPONSE = (process.env.SPICY_MONOPOLY_MCP_JSON_RESPONSE || "true").toLowerCase() !== "false";
 const MCP_ALLOWED_HOSTS = (process.env.SPICY_MONOPOLY_MCP_ALLOWED_HOSTS || "")
   .split(",")
   .map((host) => host.trim())
@@ -515,6 +516,7 @@ async function runHttp() {
     const server = createSpicyMonopolyServer();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
+      enableJsonResponse: MCP_ENABLE_JSON_RESPONSE,
     });
 
     try {
