@@ -306,14 +306,14 @@ function registerSpicyMonopoly(server) {
 
 const strArray = z.array(z.string()).default([]);
 const playerName = z.string().min(1);
-const gameId = z.string().optional().describe("Game id returned by new_game.");
-const who = z.string().min(1).describe("Player name exactly as used when starting the game.");
+const gameId = z.string().optional().describe("Required after new_game. Must be the exact game_id returned by new_game; do not invent one.");
+const who = z.string().min(1).describe("Exact player name as used in new_game.");
 const sexInput = z.string()
-  .describe("Player sex. Chinese 男/女 preferred; English male/female is accepted.");
+  .describe("Allowed: 男 or 女. Also accepts male/female/m/f/man/woman/boy/girl and converts to 男/女.");
 const roleInput = z.string()
-  .describe("Player role. Chinese 攻/受 preferred; English top/bottom is accepted.");
+  .describe("Allowed: 攻 or 受. Also accepts top/bottom/seme/uke/dom/sub and converts to 攻/受.");
 const lineupInput = z.string()
-  .describe("Pair lineup. Chinese 男女/男男/女女 preferred; common English shorthand is accepted.");
+  .describe("Allowed: 男女, 男男, 女女. Also accepts mf/fm/mm/ff and male-female/female-male/male-male/female-female.");
 const lineups = ["男女", "男男", "女女"];
 const sexes = ["男", "女"];
 const roles = ["攻", "受"];
@@ -334,6 +334,30 @@ const identityEvents = ["first_climax", "say_banned", "no_kiss_2turns"];
 const infoQueries = ["state", "shop", "list_games", "pair_history"];
 const adminActions = ["delete_game", "clear_pair_history", "submit_feedback"];
 const feedbackKinds = ["bug", "idea", "feedback"];
+const newGameDescription = [
+  "Start a new two-player game. Required/important args: p1_name, p2_name, p1_sex, p2_sex, p1_role, p2_role.",
+  "Allowed values: lineup=男女/男男/女女 (also accepts mf/mm/ff or male-female); p*_sex=男/女 (also accepts male/female/m/f); p*_role=攻/受 (also accepts top/bottom); flavor=light/medium/heavy; identity_mode=off/mixed/nsfw_only.",
+  "Optional setup: redline, open_anal, no_receive_anal, no_penetration are string arrays; game_length is integer 4-60; reverse_chance is 0-1.",
+  "Do not invent game_id. Use the returned game_id for roll/game_action/game_info. Bad parameters return an explicit 参数错误 message.",
+].join(" ");
+const rollDescription = [
+  "Advance the current turn. Required: game_id from new_game. Do not pass a player name; turn order is automatic.",
+  "Optional settlement args only when the previous result asked for them: task=done/skip, toll=pay/serve, super_action=done/buyout, duel_winner=exact player name, guess=大/小, swap_identity=true/false.",
+  "Call roll once per turn and show the returned board to players.",
+].join(" ");
+const actionDescription = [
+  `Non-roll actions. Required: action and game_id. action must be one of: ${gameActions.join(", ")}.`,
+  "Most actions also require who=exact player name. duel_result requires winner. use_card/discard_card require index. guess_mark requires spot. declare_persona requires persona. id_event requires event=first_climax/say_banned/no_kiss_2turns.",
+  "Use skip immediately when a player refuses, says stop/redline/404, or does not want a task.",
+].join(" ");
+const infoDescription = [
+  `Read-only queries. Required: query, one of: ${infoQueries.join(", ")}.`,
+  "state/shop require game_id. list_games requires player_token. pair_history requires p1_name, p1_sex, p2_name, p2_sex, and optional pair_code.",
+].join(" ");
+const adminDescription = [
+  `Rare admin/feedback actions. Required: action, one of: ${adminActions.join(", ")}.`,
+  "delete_game requires game_id and player_token. clear_pair_history requires p1_name, p1_sex, p2_name, p2_sex, optional pair_code. submit_feedback accepts text, kind=bug/idea/feedback, optional game_id/player_token/mute.",
+].join(" ");
 
 tool("monopoly_help", {
   title: "玩法与 MCP 帮助",
@@ -356,29 +380,29 @@ tool("monopoly_help", {
 
 tool("new_game", {
   title: "开新局",
-  description: "Create a new two-player game. The returned game_id is needed for later tools.",
+  description: newGameDescription,
   inputSchema: {
     lineup: lineupInput.default("男女"),
-    flavor: z.string().default("medium"),
+    flavor: z.string().default("medium").describe("Allowed: light, medium, heavy. Default medium."),
     p1_name: playerName.default("P1"),
     p1_sex: sexInput.default("男"),
     p1_role: roleInput.default("攻"),
     p2_name: playerName.default("P2"),
     p2_sex: sexInput.default("女"),
     p2_role: roleInput.default("受"),
-    p1_color: z.string().default("🔵"),
-    p2_color: z.string().default("🔴"),
-    redline: strArray.describe("Kinks or switches to exclude, e.g. 后庭, 打, 绑, 玩具, 暴露, 羞辱, 失禁, 电."),
-    no_receive_anal: strArray.describe("Players who must not receive anal. Mostly legacy; anal defaults off."),
-    open_anal: strArray.describe("Players who explicitly allow receiving anal. Empty means anal is off for both players."),
-    no_penetration: strArray.describe("Players who are pure top this game: no penetration of any hole."),
-    theme: z.string().optional(),
-    reverse_chance: z.union([z.number(), z.string()]).default(0.3),
-    identity_mode: z.string().default("mixed"),
-    game_length: z.union([z.number(), z.string()]).optional(),
+    p1_color: z.string().default("🔵").describe("Short display marker for player 1."),
+    p2_color: z.string().default("🔴").describe("Short display marker for player 2."),
+    redline: strArray.describe("String array of excluded topics/terms. Keep empty unless players specify limits."),
+    no_receive_anal: strArray.describe("String array of exact player names who must not receive this category. Legacy; defaults off unless opened."),
+    open_anal: strArray.describe("String array of exact player names who explicitly allow this category. Empty means off for both players."),
+    no_penetration: strArray.describe("String array of exact player names who are pure top this game."),
+    theme: z.string().optional().describe("Optional short theme text."),
+    reverse_chance: z.union([z.number(), z.string()]).default(0.3).describe("Number 0-1. Default 0.3."),
+    identity_mode: z.string().default("mixed").describe("Allowed: off, mixed, nsfw_only. Default mixed."),
+    game_length: z.union([z.number(), z.string()]).optional().describe("Optional integer 4-60 total turns."),
     player_token: z.string().optional().describe("Optional owner token for delete/list. Dedup does not rely on it."),
     pair_code: z.string().default("").describe("Optional private code to separate common names without changing displayed names."),
-    reset_blocklist: z.union([z.boolean(), z.string()]).default(false),
+    reset_blocklist: z.union([z.boolean(), z.string()]).default(false).describe("Boolean true/false. Usually false."),
     first_player: z.string().default("").describe("Optional exact player name who rolls first."),
   },
   annotations: { destructiveHint: false, openWorldHint: true },
@@ -398,15 +422,15 @@ tool("new_game", {
 
 tool("roll", {
   title: "掷骰 / 下一轮",
-  description: "Roll the current turn. Also settles prior pending task/toll/duel/super decisions.",
+  description: rollDescription,
   inputSchema: {
     game_id: gameId,
-    toll: z.string().optional(),
-    task: z.string().optional(),
-    super_action: z.string().optional(),
-    duel_winner: z.string().optional(),
-    guess: z.string().optional(),
-    swap_identity: z.union([z.boolean(), z.string()]).optional(),
+    toll: z.string().optional().describe("Only if previous result asks for toll settlement. Allowed: pay, serve."),
+    task: z.string().optional().describe("Only if previous task needs settlement. Allowed: done, skip."),
+    super_action: z.string().optional().describe("Only if previous prompt asks. Allowed: done, buyout."),
+    duel_winner: z.string().optional().describe("Exact winner player name, only when resolving a duel."),
+    guess: z.string().optional().describe("Gambler guess before rolling. Allowed: 大 or 小."),
+    swap_identity: z.union([z.boolean(), z.string()]).optional().describe("Boolean true/false, only when the previous result offers identity swap."),
   },
   annotations: { destructiveHint: false, openWorldHint: true },
 }, ({ game_id, ...body }) => {
@@ -443,7 +467,7 @@ function required(args, name) {
 
 tool("game_action", {
   title: "游戏操作",
-  description: "Single compact tool for non-roll gameplay actions: final_result, skip, swap, cards, identity events, mark guessing, etc.",
+  description: actionDescription,
   inputSchema: {
     action: z.string().describe(`Action to run. Allowed: ${gameActions.join(", ")}.`),
     game_id: gameId,
@@ -502,7 +526,7 @@ tool("game_action", {
 
 tool("game_info", {
   title: "游戏查询",
-  description: "Single read-only tool for state, shop, active game list, and pair history.",
+  description: infoDescription,
   inputSchema: {
     query: z.string().describe(`Query to run. Allowed: ${infoQueries.join(", ")}.`),
     game_id: z.string().optional(),
@@ -534,7 +558,7 @@ tool("game_info", {
 
 tool("game_admin", {
   title: "管理与反馈",
-  description: "Rare admin actions: delete a game, clear pair history, or submit voluntary feedback.",
+  description: adminDescription,
   inputSchema: {
     action: z.string().describe(`Admin action. Allowed: ${adminActions.join(", ")}.`),
     game_id: z.string().optional(),

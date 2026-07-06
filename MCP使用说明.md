@@ -167,12 +167,24 @@ npm install
 
 MCP 菜单刻意压到 6 个工具，避免客户端每轮都把一大串细碎工具 schema 塞进上下文。完整能力仍在 `game_action` / `game_info` / `game_admin` 的 `action` 或 `query` 参数里。
 
-工具返回也默认瘦身：普通开局、掷骰、操作只返回 AI 下一步必须用的字段，不附完整后端 JSON，也不每轮塞棋盘大块；需要完整局面时再调用 `game_info` 的 `state`。
+工具返回也默认瘦身：普通开局、掷骰、操作只返回 AI 下一步必须用的字段，不附完整后端 JSON；但 `board` 会保留，方便 AI 贴给玩家看。需要完整局面时再调用 `game_info` 的 `state`。
+
+## AI 传参规矩
+
+- `new_game` 必填/常用：`p1_name`、`p2_name`、`p1_sex`、`p2_sex`、`p1_role`、`p2_role`。
+- 性别只用 `男` / `女`；兼容 `male` / `female` / `m` / `f`，服务端会自动转换。
+- 角色只用 `攻` / `受`；兼容 `top` / `bottom`，服务端会自动转换。
+- `lineup` 只用 `男女` / `男男` / `女女`；兼容 `mf` / `mm` / `ff`。
+- `flavor` 只用 `light` / `medium` / `heavy`；`identity_mode` 只用 `off` / `mixed` / `nsfw_only`。
+- `roll` 必须传 `game_id`，不要传玩家名；轮到谁由游戏自动决定。
+- `roll` 的结算参数只在上一轮返回提示时才传：`task=done/skip`、`toll=pay/serve`、`super_action=done/buyout`、`guess=大/小`。
+- `game_action` 必须传 `action` 和 `game_id`；大部分 action 还要传 `who`，必须是开局时的玩家原名。
+- 如果参数不对，工具会返回 `isError: true` 和 `参数错误: ...`，AI 应该读错误信息后重新调用，不要假装成功。
 
 ## 给 AI 的一句话
 
 ```text
-请用 spicy-monopoly MCP 工具运行游戏。不要自己编骰子、任务、金币、赢家或隐藏位置。先 new_game，再每轮 roll，并严格按返回的 hint/action_needed 继续。跳过/换卡/终局等都用 game_action。
+请用 spicy-monopoly MCP 工具运行游戏。不要自己编骰子、任务、金币、赢家或隐藏位置。先 new_game，再每轮 roll，并严格按返回的 hint/action_needed 继续。性别用男/女，角色用攻/受，roll 只传 game_id 不传玩家名。跳过/换卡/终局等都用 game_action。如果工具返回参数错误，按错误提示修正后重新调用。
 ```
 
 ## 注意
