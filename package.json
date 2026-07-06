@@ -1,0 +1,21 @@
+{
+  "name": "spicy-monopoly",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Spicy Monopoly engine, HTTP API, and MCP server.",
+  "bin": {
+    "spicy-monopoly-mcp": "./mcp-server.js"
+  },
+  "scripts": {
+    "mcp": "node ./mcp-server.js",
+    "api": "uvicorn monopoly_api:app --host 127.0.0.1 --port 8069"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  }
+}

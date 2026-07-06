@@ -15,6 +15,9 @@ __pycache__/
 .venv/
 venv/
 
+# ── Node / MCP ──
+node_modules/
+
 # ── 备份/临时 ──
 *.bak
 *.bak.*

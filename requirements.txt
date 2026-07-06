@@ -3,3 +3,7 @@
 fastapi
 uvicorn
 pydantic
+
+# MCP 玩法走 Node.js：
+#   npm install
+#   node mcp-server.js
