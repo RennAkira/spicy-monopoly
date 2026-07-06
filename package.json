@@ -9,7 +9,8 @@
   },
   "scripts": {
     "mcp": "node ./mcp-server.js",
-    "api": "uvicorn monopoly_api:app --host 127.0.0.1 --port 8069"
+    "api": "uvicorn monopoly_api:app --host 127.0.0.1 --port 8069",
+    "mcp:http": "node ./mcp-server.js --http"
   },
   "engines": {
     "node": ">=18"

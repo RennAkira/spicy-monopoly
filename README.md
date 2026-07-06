@@ -30,15 +30,23 @@ https://spicy-monopoly.lol
 ```
 （一个公开托管实例：本地库抽签、零 key、有限流。把手册里的接入地址换成它即可。请文明使用、别刷爆它 🙏）
 
-### ⭐ 给 MCP 客户端 —— 一键工具化
-如果你的 AI 前端支持 MCP（比如 Claude Desktop / Claude Code / Chatbox 等），可以直接接本仓库的 MCP server。AI 会看到 6 个高层工具：开局、掷骰、游戏操作、查询、管理和帮助；跳过/换卡/对决/功能卡/身份事件等都收在一个 `game_action` 里，不需要自己会写 HTTP。
+### ⭐ 给 MCP 客户端 —— 远程一键工具化
+如果你的 AI 前端支持远程 MCP / Streamable HTTP MCP，直接填官方 MCP URL 即可：
+
+```text
+https://spicy-monopoly.lol/mcp
+```
+
+AI 会看到 6 个高层工具：开局、掷骰、游戏操作、查询、管理和帮助；跳过/换卡/对决/功能卡/身份事件等都收在一个 `game_action` 里，不需要自己会写 HTTP。
+
+要自己部署远程 MCP：
 
 ```bash
 npm install
-node mcp-server.js
+npm run mcp:http
 ```
 
-客户端配置见 [`MCP使用说明.md`](./MCP使用说明.md)。默认连公开托管实例 `https://spicy-monopoly.lol`；自建服务可设 `SPICY_MONOPOLY_BASE_URL=http://127.0.0.1:8069`。
+客户端配置和部署参数见 [`MCP使用说明.md`](./MCP使用说明.md)。MCP server 默认转发到公开托管实例 `https://spicy-monopoly.lol`；自建服务可设 `SPICY_MONOPOLY_BASE_URL=http://127.0.0.1:8069`。如果客户端还不支持远程 MCP，也可以用本地 stdio 模式运行 `node mcp-server.js`。
 
 ### 或者以下玩法
 
@@ -83,8 +91,8 @@ uvicorn monopoly_api:app --host 0.0.0.0 --port 8069
 | `monopoly-给AI的操作手册.md` | 给 AI（荷官兼玩家）照着调的说明书 |
 | `monopoly-API使用手册.md` | HTTP 接口手册 |
 | `monopoly-怎么玩-人类版.md` | 给人看的玩法简介 |
-| `mcp-server.js` | MCP server（默认连接公开托管 API，也可连自建 API） |
-| `MCP使用说明.md` | MCP 客户端安装和配置说明 |
+| `mcp-server.js` | MCP server（支持本地 stdio 和远程 Streamable HTTP；默认连接公开托管 API，也可连自建 API） |
+| `MCP使用说明.md` | MCP 客户端接入、远程部署和本地配置说明 |
 
 ## 想改／扩库？
 

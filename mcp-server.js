@@ -5,7 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod/v4";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -13,14 +15,27 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BASE_URL = "https://spicy-monopoly.lol";
 const BASE_URL = (process.env.SPICY_MONOPOLY_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
 const TIMEOUT_MS = Number.parseInt(process.env.SPICY_MONOPOLY_TIMEOUT_MS || "20000", 10);
+const MCP_TRANSPORT = (process.env.SPICY_MONOPOLY_MCP_TRANSPORT || (process.argv.includes("--http") ? "http" : "stdio")).toLowerCase();
+const MCP_HOST = process.env.SPICY_MONOPOLY_MCP_HOST || process.env.HOST || "127.0.0.1";
+const MCP_PORT = Number.parseInt(process.env.SPICY_MONOPOLY_MCP_PORT || process.env.PORT || "3000", 10);
+const MCP_PATH = process.env.SPICY_MONOPOLY_MCP_PATH || "/mcp";
+const MCP_BEARER_TOKEN = process.env.SPICY_MONOPOLY_MCP_BEARER_TOKEN || "";
+const MCP_ALLOWED_HOSTS = (process.env.SPICY_MONOPOLY_MCP_ALLOWED_HOSTS || "")
+  .split(",")
+  .map((host) => host.trim())
+  .filter(Boolean);
 
-const server = new McpServer({
-  name: "spicy-monopoly",
-  title: "Spicy Monopoly",
-  version: "0.1.0",
-  description: "MCP tools for playing Spicy Monopoly through the public or self-hosted HTTP API.",
-  websiteUrl: "https://github.com/RennAkira/spicy-monopoly",
-});
+function createSpicyMonopolyServer() {
+  const server = new McpServer({
+    name: "spicy-monopoly",
+    title: "Spicy Monopoly",
+    version: "0.1.0",
+    description: "MCP tools for playing Spicy Monopoly through the public or self-hosted HTTP API.",
+    websiteUrl: "https://github.com/RennAkira/spicy-monopoly",
+  });
+  registerSpicyMonopoly(server);
+  return server;
+}
 
 function compact(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -127,15 +142,16 @@ function errorResult(error) {
   };
 }
 
-function tool(name, config, handler) {
-  server.registerTool(name, config, async (args) => {
-    try {
-      return result(await handler(args || {}));
-    } catch (error) {
-      return errorResult(error);
-    }
-  });
-}
+function registerSpicyMonopoly(server) {
+  function tool(name, config, handler) {
+    server.registerTool(name, config, async (args) => {
+      try {
+        return result(await handler(args || {}));
+      } catch (error) {
+        return errorResult(error);
+      }
+    });
+  }
 
 const strArray = z.array(z.string()).default([]);
 const playerName = z.string().min(1);
@@ -395,5 +411,125 @@ server.registerPrompt("start_spicy_monopoly", {
     },
   }],
 }));
+}
 
-await server.connect(new StdioServerTransport());
+async function runStdio() {
+  const server = createSpicyMonopolyServer();
+  await server.connect(new StdioServerTransport());
+}
+
+function isAuthorized(req) {
+  if (!MCP_BEARER_TOKEN) return true;
+  return req.get("authorization") === `Bearer ${MCP_BEARER_TOKEN}`;
+}
+
+async function runHttp() {
+  const app = createMcpExpressApp({
+    host: MCP_HOST,
+    allowedHosts: MCP_ALLOWED_HOSTS.length ? MCP_ALLOWED_HOSTS : undefined,
+  });
+
+  app.use((req, res, next) => {
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("access-control-allow-headers", "authorization, content-type, mcp-protocol-version, mcp-session-id");
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
+  app.get("/", (_req, res) => {
+    res.json({
+      name: "spicy-monopoly",
+      transport: "streamable-http",
+      endpoint: MCP_PATH,
+      mcp_url: `${MCP_PATH}`,
+      api_base_url: BASE_URL,
+    });
+  });
+
+  app.get("/healthz", (_req, res) => {
+    res.json({ ok: true, api_base_url: BASE_URL });
+  });
+
+  app.post(MCP_PATH, async (req, res) => {
+    if (!isAuthorized(req)) {
+      res.status(401).json({
+        jsonrpc: "2.0",
+        error: { code: -32001, message: "Unauthorized" },
+        id: null,
+      });
+      return;
+    }
+
+    const server = createSpicyMonopolyServer();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+      res.on("close", () => {
+        transport.close();
+        server.close();
+      });
+    } catch (error) {
+      console.error("Error handling MCP request:", error);
+      transport.close();
+      server.close();
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal server error" },
+          id: null,
+        });
+      }
+    }
+  });
+
+  app.get(MCP_PATH, (_req, res) => {
+    res.status(405).json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Method not allowed. Use POST for Streamable HTTP MCP." },
+      id: null,
+    });
+  });
+
+  app.delete(MCP_PATH, (_req, res) => {
+    res.status(405).json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Method not allowed in stateless MCP mode." },
+      id: null,
+    });
+  });
+
+  const httpServer = app.listen(MCP_PORT, MCP_HOST, () => {
+    console.log(`Spicy Monopoly remote MCP listening on http://${MCP_HOST}:${MCP_PORT}${MCP_PATH}`);
+    console.log(`Forwarding game API calls to ${BASE_URL}`);
+  });
+
+  httpServer.on("error", (error) => {
+    console.error("Failed to start MCP HTTP server:", error);
+    process.exit(1);
+  });
+
+  process.on("SIGINT", () => {
+    httpServer.close(() => process.exit(0));
+  });
+
+  process.on("SIGTERM", () => {
+    httpServer.close(() => process.exit(0));
+  });
+}
+
+if (MCP_TRANSPORT === "http" || MCP_TRANSPORT === "streamable-http") {
+  await runHttp();
+} else if (MCP_TRANSPORT === "stdio") {
+  await runStdio();
+} else {
+  console.error(`Unsupported SPICY_MONOPOLY_MCP_TRANSPORT: ${MCP_TRANSPORT}`);
+  process.exit(1);
+}

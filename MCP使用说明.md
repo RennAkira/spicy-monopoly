@@ -2,19 +2,67 @@
 
 这个 MCP server 让支持 MCP 的客户端直接调用大富翁工具，不需要自己写 HTTP POST。
 
-默认连接公开托管实例：
+它有两种模式：
+
+- **远程 MCP**：玩家只在客户端里填一个 MCP URL，不需要 clone / npm install。
+- **本地 stdio MCP**：玩家在自己电脑上 clone 仓库，适合还不支持远程 MCP 的客户端。
+
+无论哪种模式，默认都会把游戏请求转发到公开托管 API：
 
 ```text
 https://spicy-monopoly.lol
 ```
 
-也可以用环境变量切到自己的服务：
+## 玩家接入远程 MCP
 
-```bash
-SPICY_MONOPOLY_BASE_URL=http://127.0.0.1:8069 node /path/to/spicy-monopoly/mcp-server.js
+官方公开远程 MCP 地址：
+
+```text
+https://spicy-monopoly.lol/mcp
 ```
 
-## 安装
+如果客户端支持远程 MCP / Streamable HTTP MCP，把这个 URL 填进去即可。
+
+有些客户端用 JSON 配置，通常长这样：
+
+```json
+{
+  "mcpServers": {
+    "spicy-monopoly": {
+      "url": "https://spicy-monopoly.lol/mcp"
+    }
+  }
+}
+```
+
+自建远程 MCP 时，把 URL 换成自己的域名：
+
+```json
+{
+  "mcpServers": {
+    "spicy-monopoly": {
+      "url": "https://你的域名/mcp"
+    }
+  }
+}
+```
+
+如果服务方设置了访问 token，客户端还需要带请求头：
+
+```json
+{
+  "mcpServers": {
+    "spicy-monopoly": {
+      "url": "https://你的域名/mcp",
+      "headers": {
+        "Authorization": "Bearer 服务方给你的token"
+      }
+    }
+  }
+}
+```
+
+## 服务方部署远程 MCP
 
 需要 Node.js 18+。
 
@@ -22,9 +70,52 @@ SPICY_MONOPOLY_BASE_URL=http://127.0.0.1:8069 node /path/to/spicy-monopoly/mcp-s
 git clone https://github.com/RennAkira/spicy-monopoly.git
 cd spicy-monopoly
 npm install
+npm run mcp:http
 ```
 
-## 客户端配置
+默认监听：
+
+```text
+http://127.0.0.1:3000/mcp
+```
+
+公开部署时一般要绑定到 `0.0.0.0`，并让平台提供 HTTPS 域名：
+
+```bash
+SPICY_MONOPOLY_MCP_HOST=0.0.0.0 PORT=3000 npm run mcp:http
+```
+
+常用环境变量：
+
+| 变量 | 作用 |
+|---|---|
+| `SPICY_MONOPOLY_MCP_TRANSPORT` | `stdio` 或 `http`。也可以用 `node mcp-server.js --http`。 |
+| `SPICY_MONOPOLY_MCP_HOST` | HTTP 监听地址，公开部署常用 `0.0.0.0`。 |
+| `SPICY_MONOPOLY_MCP_PORT` / `PORT` | HTTP 端口，默认 `3000`。 |
+| `SPICY_MONOPOLY_MCP_PATH` | MCP 路径，默认 `/mcp`。 |
+| `SPICY_MONOPOLY_MCP_ALLOWED_HOSTS` | 可选，逗号分隔的 Host 白名单。 |
+| `SPICY_MONOPOLY_MCP_BEARER_TOKEN` | 可选，设置后远程客户端必须带 `Authorization: Bearer ...`。 |
+| `SPICY_MONOPOLY_BASE_URL` | 可选，默认转发到 `https://spicy-monopoly.lol`；自建 API 时改成自己的 API。 |
+| `SPICY_MONOPOLY_TIMEOUT_MS` | 可选，转发 API 的超时时间，默认 `20000`。 |
+
+自建 API + 远程 MCP 的例子：
+
+```bash
+SPICY_MONOPOLY_BASE_URL=https://api.example.com \
+SPICY_MONOPOLY_MCP_HOST=0.0.0.0 \
+PORT=3000 \
+npm run mcp:http
+```
+
+## 本地 stdio MCP
+
+如果客户端还不支持远程 MCP，可以用本地 stdio 方式。
+
+```bash
+git clone https://github.com/RennAkira/spicy-monopoly.git
+cd spicy-monopoly
+npm install
+```
 
 把下面配置加到支持 MCP 的客户端里，路径换成你本机仓库路径：
 
@@ -39,7 +130,7 @@ npm install
 }
 ```
 
-如果要连自建 API：
+本地 stdio 想连自建 API：
 
 ```json
 {
