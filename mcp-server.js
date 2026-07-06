@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod/v4";
@@ -477,6 +478,7 @@ async function runHttp() {
     host: MCP_HOST,
     allowedHosts: MCP_ALLOWED_HOSTS.length ? MCP_ALLOWED_HOSTS : undefined,
   });
+  const sseTransports = new Map();
 
   app.use((req, res, next) => {
     res.setHeader("access-control-allow-origin", "*");
@@ -540,12 +542,46 @@ async function runHttp() {
     }
   });
 
-  app.get(MCP_PATH, (_req, res) => {
-    res.status(405).json({
-      jsonrpc: "2.0",
-      error: { code: -32000, message: "Method not allowed. Use POST for Streamable HTTP MCP." },
-      id: null,
+  async function handleLegacySse(_req, res) {
+    const transport = new SSEServerTransport("/messages", res);
+    sseTransports.set(transport.sessionId, transport);
+    res.on("close", () => {
+      sseTransports.delete(transport.sessionId);
     });
+    const server = createSpicyMonopolyServer();
+    await server.connect(transport);
+  }
+
+  app.get(MCP_PATH, async (req, res) => {
+    try {
+      await handleLegacySse(req, res);
+    } catch (error) {
+      console.error("Error handling legacy MCP SSE request:", error);
+      if (!res.headersSent) res.status(500).send("Internal server error");
+    }
+  });
+
+  app.get("/sse", async (req, res) => {
+    try {
+      await handleLegacySse(req, res);
+    } catch (error) {
+      console.error("Error handling legacy MCP SSE request:", error);
+      if (!res.headersSent) res.status(500).send("Internal server error");
+    }
+  });
+
+  app.post("/messages", async (req, res) => {
+    const sessionId = String(req.query.sessionId || "");
+    const transport = sseTransports.get(sessionId);
+    if (!transport) {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "No legacy SSE transport found for sessionId." },
+        id: null,
+      });
+      return;
+    }
+    await transport.handlePostMessage(req, res, req.body);
   });
 
   app.delete(MCP_PATH, (_req, res) => {
