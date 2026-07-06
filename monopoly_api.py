@@ -39,7 +39,7 @@ SEEN_DIR.mkdir(exist_ok=True)
 
 # ── AI/荷官反馈通道(众包·跟换卡日志一个性质) ──
 FEEDBACK_LOG = Path(__file__).parent / "monopoly-feedback.jsonl"
-FEEDBACK_PROMPT_ENABLED = True   # 终局轻推 AI 留反馈的总开关(想全局关掉=False)
+FEEDBACK_PROMPT_ENABLED = False  # ★默认【关】:玩完别破坏气氛第一位·不在终局主动问反馈。想开启终局轻推=True(端点始终可用·跟这开关无关)
 FEEDBACK_PROMPT_TEXT = (
     "🛎️ 这局玩完啦。第一位的永远是——【别破坏气氛】:刚玩完的余韵、亲密还在的时候,别硬生生转成「填问卷」。\n"
     "只有气氛轻松、聊得开的时候,才顺口提一句就好:做这个游戏的人很欢迎大家的意见和反馈,愿意的话可以聊聊这局玩得怎么样、有没有哪里别扭或像出了 bug。\n"
