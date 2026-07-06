@@ -37,6 +37,18 @@ GAMES_DIR.mkdir(exist_ok=True)
 SEEN_DIR = Path(__file__).parent / "monopoly-seen"   # 跨局记忆:每个玩家令牌一个抽屉
 SEEN_DIR.mkdir(exist_ok=True)
 
+# ── AI/荷官反馈通道(众包·跟换卡日志一个性质) ──
+FEEDBACK_LOG = Path(__file__).parent / "monopoly-feedback.jsonl"
+FEEDBACK_PROMPT_ENABLED = True   # 终局轻推 AI 留反馈的总开关(想全局关掉=False)
+FEEDBACK_PROMPT_TEXT = (
+    "🛎️ 这局玩完啦。第一位的永远是——【别破坏气氛】:刚玩完的余韵、亲密还在的时候,别硬生生转成「填问卷」。\n"
+    "只有气氛轻松、聊得开的时候,才顺口提一句就好:做这个游戏的人很欢迎大家的意见和反馈,愿意的话可以聊聊这局玩得怎么样、有没有哪里别扭或像出了 bug。\n"
+    "★反馈【完全不是必须的】(真的不是)——只是制作者的一个小小心愿。人类不想聊、或气氛不对,就自然收场,啥也别问,一点不影响。\n"
+    "要是真聊出了值得记的(bug/点子/体验),你可以顺手替大家带一句给制作者:\n"
+    "  POST /feedback  body:{\"game_id\":\"<本局game_id>\",\"kind\":\"bug|idea|feedback\",\"text\":\"...\"}\n"
+    "不想以后再看到这条提示:POST /feedback 带 {\"mute\":true} 就好。"
+)
+
 
 # ── Models ──
 
@@ -80,6 +92,13 @@ class UseItemRequest(BaseModel):
     who: str
     item: str
 
+class FeedbackRequest(BaseModel):
+    text: str = ""                     # bug 或意见正文(自由文本)
+    kind: str = "feedback"             # bug / idea / feedback(默认)
+    game_id: Optional[str] = None      # 哪局(可选·带上能定位是哪局 + 让 mute 找到这对玩家)
+    player_token: Optional[str] = None # 谁反馈的(可选·纯留档)
+    mute: bool = False                 # ★true=这对玩家以后终局不再被轻推(不想再被问)
+
 
 # ── Helpers ──
 
@@ -114,10 +133,11 @@ def _load_token(token: str) -> dict:
             return {"recency": recency, "game_count": gc, "last_game_id": d.get("last_game_id"),
                     "identities": list(d.get("identities", [])),
                     "blocklist": list(d.get("blocklist", [])),   # swap换掉的永久黑名单(硬排除永不出)
+                    "feedback_optout": bool(d.get("feedback_optout", False)),   # 关掉终局反馈轻推(不想再被问)·必须round-trip别被这层重建丢掉
                     "folded": list(d.get("folded", []))}   # folded=已折的game_id(防重折)·identities=身份跨局去重(独立子系统·不动)
         except Exception:
             pass
-    return {"recency": [], "game_count": 0, "last_game_id": None, "identities": [], "blocklist": [], "folded": []}
+    return {"recency": [], "game_count": 0, "last_game_id": None, "identities": [], "blocklist": [], "feedback_optout": False, "folded": []}
 
 def _save_token(token: str, rec: dict):
     _atomic_write(_token_path(token), json.dumps(rec, ensure_ascii=False))
@@ -488,13 +508,55 @@ def duel_result(game_id: str, winner: str):
 def final_result(game_id: str):
     """终局:满回合后看赢家(比金币)+ 赢家终极指令。★终局收益(🎩年上/🐤年下转账·🌀淫纹守住)在这里结算·须 _save 落盘(幂等只算一次)。"""
     g = _load(game_id)
+    was_settled = getattr(g, "_final_settled", False)   # 只在第一次真结算时轻推反馈(每局一次·重复调 final_result 别重复问)
     result = g.final_result()
     _save(game_id, g)
+    optout = False
     if g.dedup_key:                                    # 终局立即折进去重池(不依赖下一局开局·删局也不丢历史)
         rec = _load_token(g.dedup_key)
+        optout = bool(rec.get("feedback_optout"))
         _fold_game_into(rec, g, game_id)
         _save_token(g.dedup_key, rec)
-    return {"result": result, "board": g.board_art()}
+    feedback_prompt = None                             # 🛎️给荷官AI的悄悄话:只第一次结算、且没关过、且总开关开 才出现
+    if FEEDBACK_PROMPT_ENABLED and not was_settled and not optout:
+        feedback_prompt = FEEDBACK_PROMPT_TEXT
+    return {"result": result, "board": g.board_art(), "feedback_prompt": feedback_prompt}
+
+
+@app.post("/feedback")
+def feedback(req: FeedbackRequest):
+    """AI/荷官留言:bug 或意见,自由文本→落 monopoly-feedback.jsonl(众包·跟换卡日志一个性质)。
+    带 game_id 能定位是哪局;mute:true=这对玩家以后终局不再被轻推(不想再被问)。text 与 mute 至少给一个。"""
+    dedup = None
+    if req.game_id and _path(req.game_id).exists():
+        try:
+            dedup = Game.load(str(_path(req.game_id))).dedup_key   # 从这局拿这对玩家的抽屉键(mute 要落到 ta 的抽屉)
+        except Exception:
+            pass
+    muted = False
+    if req.mute and dedup:
+        rec = _load_token(dedup)
+        rec["feedback_optout"] = True
+        _save_token(dedup, rec)
+        muted = True
+    text = (req.text or "").strip()
+    logged = False
+    if text:
+        try:
+            import time as _t
+            entry = {"ts": int(_t.time()), "kind": req.kind, "text": text,
+                     "game_id": req.game_id, "token": req.player_token, "dedup": dedup}
+            with open(str(FEEDBACK_LOG), "a", encoding="utf-8") as f:   # 失败别抛(留言不该弄崩别的)
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            logged = True
+        except Exception:
+            pass
+    if not text and not muted:
+        raise HTTPException(400, "feedback 至少带一个:text(想说的话)或 mute:true(关掉终局提示)。带 mute 却没生效=game_id 没传对、定位不到这对玩家。")
+    msg = []
+    if logged: msg.append("收到啦,谢谢你的反馈💛(已记下,开发者会看到)")
+    if muted:  msg.append("好的,以后终局不再打扰你(想恢复=清一次跨局历史即可)")
+    return {"ok": True, "logged": logged, "muted": muted, "msg": " ｜ ".join(msg) or "已处理"}
 
 
 @app.get("/state/{game_id}")
