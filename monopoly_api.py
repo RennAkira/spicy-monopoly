@@ -7,6 +7,7 @@ FastAPI 包装 monopoly_play.Game，提供 HTTP 接口。
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
@@ -75,6 +76,8 @@ class NewGameRequest(BaseModel):
     pair_code: str = ""                  # 暗号:撞名了不用改名·加个独特暗号就跟别人分开(默认空·同名字+性别自动认)
     reset_blocklist: bool = False        # ★洗白这对的永久黑名单(swap拉黑错了·想恢复全部被换掉的卡)
     first_player: str = ""               # ★谁先掷骰(默认p1_name先手)·想让AI/某人先手就填ta的名字(必须是两个玩家名之一)
+    setup_confirmed: bool = False        # API/MCP 开局保护:确认荷官已说明规则和安全设置后再开局
+    manual_confirmed: bool = False       # 兼容别名:已读/已理解手册并完成开局说明
 
 class RollRequest(BaseModel):
     """掷骰时一行带上悬账决定(傻瓜命令行要能吃参数,金币变化别再额外跑命令)。全部可选,不传=默认。"""
@@ -172,6 +175,79 @@ def _close_prev_and_avoid(rec: dict) -> list:
 
 # ── Endpoints ──
 
+HELP_SUMMARY = {
+    "name": "涩涩大富翁 API",
+    "api_base": "https://spicy-monopoly.lol",
+    "manual_required": True,
+    "manual_note": "如果你已经了解规则、已经向玩家说明并确认设置，不必重读全文；把原 /new_game 请求加 setup_confirmed:true 后重试即可。",
+    "read_if_unfamiliar": ["GET /help", "GET /manual/ai", "GET /manual/api"],
+    "new_game": {
+        "method": "POST",
+        "path": "/new_game",
+        "required_before_start": [
+            "说明金币/地盘胜负、回合制、任务后下一次 roll 才结算",
+            "说明安全词 404、任何红线/停/不要都立刻 skip 或停止",
+            "询问并确认名字、性别、攻受、强度、红线、后庭 open_anal、纯 top no_penetration、反转概率、局长、身份模式、先手",
+            "常见名/默认名先查历史或开局后读 history_note；若撞名，问 pair_code 后重开",
+        ],
+        "retry": "POST /new_game with setup_confirmed:true after the setup briefing is done",
+    },
+    "after_new_game": [
+        "把 active_limits 原样念给玩家确认",
+        "把 history_note 念给玩家；如果显示玩过但玩家说不是他们，重开并传 pair_code",
+        "把 status 的身份完整剧本、identity_reminder、board 念给玩家",
+    ],
+    "turn_loop": [
+        "POST /roll/{game_id}",
+        "念 task/truth/toll/duel/card/mystery 和 board",
+        "等待玩家玩完/说继续，再下一次 roll",
+        "不要自己编骰子、任务、金币、赢家或隐藏状态",
+    ],
+    "common_paths": {
+        "start": "POST /new_game",
+        "roll": "POST /roll/{game_id}",
+        "state": "GET /state/{game_id}",
+        "history": "GET /seen/{pair_history_key}; key 按名字+性别+pair_code 派生，详见手册",
+    },
+}
+
+def manual_required_response():
+    return JSONResponse(status_code=428, content={
+        "ok": False,
+        "manual_required": True,
+        "error": "开局前置步骤未确认：不要直接开局。",
+        "short_answer": "如果你已经向玩家说明过规则/安全词并确认设置，不需要读全文；原请求加 setup_confirmed:true 后重试。",
+        "read_if_unfamiliar": HELP_SUMMARY["read_if_unfamiliar"],
+        "checklist": HELP_SUMMARY["new_game"]["required_before_start"],
+        "retry": HELP_SUMMARY["new_game"]["retry"],
+    })
+
+@app.get("/")
+def root_help():
+    return HELP_SUMMARY
+
+@app.get("/help")
+def help_summary():
+    return HELP_SUMMARY
+
+@app.get("/manual/ai")
+def manual_ai():
+    return PlainTextResponse((Path(__file__).parent / "monopoly-给AI的操作手册.md").read_text("utf-8"), media_type="text/markdown")
+
+@app.get("/manual/api")
+def manual_api():
+    return PlainTextResponse((Path(__file__).parent / "monopoly-API使用手册.md").read_text("utf-8"), media_type="text/markdown")
+
+@app.api_route("/new", methods=["GET", "POST"])
+@app.api_route("/start", methods=["GET", "POST"])
+def wrong_new_endpoint():
+    return JSONResponse(status_code=404, content={
+        "ok": False,
+        "error": "端点不存在：开局请用 POST /new_game，不是 /new 或 /start。",
+        "help": "GET /help",
+        "retry": "POST /new_game with setup_confirmed:true after explaining rules and confirming setup.",
+    })
+
 _INTRO = (
     "【荷官须知·开局只发这一次·别每轮重复】\n"
     "你是这局的荷官,同时也是玩家之一——重点是【玩】!和你的人类一起享受色色大富翁,不是跑任务推进度。掷第一轮前,用大白话跟ta讲清楚:\n"
@@ -192,6 +268,8 @@ _INTRO = (
 def new_game(req: NewGameRequest):
     """开局：创建新游戏，返回 game_id + player_token + 棋盘 + 状态。
     跨局记忆:带上次的 player_token → 这局自动躲开你最近10局出过的任务;不带则发个新令牌给你。"""
+    if not (req.setup_confirmed or req.manual_confirmed):
+        return manual_required_response()
     dedup = _dedup_key(req.p1_name, req.p2_name, req.p1_sex, req.p2_sex, req.pair_code)   # 去重key按名字+性别[+暗号](AI不用记·忘token也接得上)
     token = req.player_token or uuid.uuid4().hex[:12]   # token只做鉴权(删局/看局)·去重不靠它
     rec = _load_token(dedup)

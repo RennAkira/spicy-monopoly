@@ -606,7 +606,6 @@ tool("new_game", {
       mcp_resources: mcpResources,
     });
   }
-  delete args.setup_confirmed;
   return request("POST", "/new_game", args).then((data) => ({
     ...data,
     host_guide: newGameHostGuide,
