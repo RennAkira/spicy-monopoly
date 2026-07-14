@@ -106,12 +106,15 @@
 
 ## 7. 结算和特殊操作
 
+> **节奏铁律**：任务要**完整念清楚**再等玩家真做。玩家选「做任务」（不是交钱）只是**选了做、不是做完**——别一说「做」你就 `roll`（一 roll 就把上一题结算成完成了）跳去下一轮。人类那道尤其给足空间等 ta 真做，别替 ta 快进。
+
 - 玩家做完普通任务：`game_action {action:"done", game_id, who}`，或下次 `roll` 里按返回提示传 `task:"done"`。
 - 玩家拒绝或碰红线：立刻 `game_action {action:"skip", game_id, who}`。
 - 玩家想换任务：`game_action {action:"swap", game_id, who}`。
 - 过路费：按返回提示用 `roll {game_id, toll:"pay"|"serve"}` 或 `game_action {action:"pay_toll", game_id, who}`。
 - 对决：`game_action {action:"duel_result", game_id, winner:"赢家名"}`。
 - 终局：`game_action {action:"final_result", game_id}`。
+- **终局平局**：想分胜负 → `roll {game_id, tiebreak:true}`（加掷决胜·延长一轮·两人各再掷一次·还平再带一次）；或就此平手言和、各砸对方一道终极指令收尾。
 
 ## 8. 出错时
 

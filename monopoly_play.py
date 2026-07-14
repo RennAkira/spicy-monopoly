@@ -1419,7 +1419,9 @@ class Game:
         head = ("\n".join(settle_lines) + "\n") if settle_lines else ""
         ca, cb = self.coins[self.p1], self.coins[self.p2]
         if ca == cb:
-            return f"{head}🏁 终局平局!{self.p1} {ca}币 = {self.p2} {cb}币 —— 各砸一道终极指令,或加掷决胜"
+            return (f"{head}🏁 终局平局!{self.p1} {ca}币 = {self.p2} {cb}币 —— 两条路二选一:\n"
+                    f"　① 平手言和·各砸对方一道终极指令收尾;\n"
+                    f"　② 加掷决胜:再 roll 一次、带上 tiebreak(平局加掷)→ 两人各再掷一轮、打完再比金币,还平就再加一轮。")
         winner = self.p1 if ca > cb else self.p2
         loser = self._opponent(winner)
         # 终极指令锁盘内最高档(实测:走普通窗口只出4-5太温)——medium=(5,6)/heavy=(6,6)/light=(3,4);
@@ -1431,6 +1433,22 @@ class Game:
         cmd = self._render(t, winner) if t else "你说了算·一道 ta 不能拒绝的"
         return (f"{head}🏁 终局!{winner} {self.coins[winner]}币 ＞ {loser} {self.coins[loser]}币 → 🏆 {winner} 赢!\n"
                 f"🏆 {winner} 免费砸一道终极指令(除红线 / 404·{loser} 不能拒绝):{cmd}")
+
+    def add_tiebreak(self, rounds=2):
+        """平局加掷决胜:牌局已打满、且当前金币平手时,把总回合数延长 rounds 回合
+        (默认 2 = 两人各再掷一次),让追平的僵局分出胜负。没打满/不是平局都不给加(不乱续局)。
+        幂等安全:先确保终局身份收益(🎩年上/🐤年下转账·🌀淫纹守住)已结清,平局判断才基于最终币数。"""
+        if not self.is_over():
+            return {"ok": False, "say": "还没打满回合呢·加掷决胜是打完平局才用的。"}
+        if not getattr(self, "_final_settled", False):
+            self.final_result()          # 幂等结清终局收益(它自己 set _final_settled)·让下面按最终币数判平局
+        ca, cb = self.coins[self.p1], self.coins[self.p2]
+        if ca != cb:
+            w = self.p1 if ca > cb else self.p2
+            return {"ok": False, "say": f"现在不是平局({w} 币多)·直接看 final_result 谁赢就行,不用加掷。"}
+        self.total_rounds += rounds
+        return {"ok": True, "rounds": rounds,
+                "say": "⚔️ 平局·加掷决胜!两人各再掷一轮,打完再比金币——还平就再加一轮。"}
 
     def safety_summary(self):
         # 开局回显「实际生效的安全设置」给荷官念·治「以为禁了其实没设上」。
@@ -1640,9 +1658,15 @@ def _cli():
         return
 
     if cmd == "roll":
-        if g.is_over():
-            print("🏁 游戏已结束。"); print(g.final_result()); return
         rest = args[1:]
+        want_tb = any(a in ("tiebreak", "决胜", "加掷") for a in rest)   # 平局加掷决胜:满回合平手时延长一轮再掷
+        if g.is_over():
+            if not want_tb:
+                print("🏁 游戏已结束。"); print(g.final_result()); return
+            tb = g.add_tiebreak(); print(tb["say"]); g.save(STATE)
+            if not tb["ok"]:
+                return                                   # 非平局/没打满:add_tiebreak 已说明·别再掷
+            # 平局加掷成功 → is_over 变 False·继续往下掷决胜这一轮
         guess = next((a for a in rest if a in ("大", "小")), None)   # 🎰赌徒押大小
         swap_id = any(a in ("换身份", "swapid", "swap_id") for a in rest)   # 身份任期保护:上轮机会格【保留】了新身份·这轮改主意换掉
         r = g.roll(guess=guess, swap_identity=swap_id)
@@ -1690,7 +1714,7 @@ def _cli():
     elif cmd == "reroll_id": print(g.reroll_identity(args[1]))
     else:
         print('命令: new "名:性别:攻受" "名:性别:攻受" [强度] [反转] [回合数] [红线] [开肛=名字] [纯top=名字] [身份=off/mixed/nsfw_only] [先手=名字]')
-        print('       roll [大/小] [换身份] | done | skip | swap | buyout | buy | pay | duel <赢家> | card <序号> | discard <序号> | reroll_id <名字> | status | result')
+        print('       roll [大/小] [换身份] [tiebreak=平局加掷决胜] | done | skip | swap | buyout | buy | pay | duel <赢家> | card <序号> | discard <序号> | reroll_id <名字> | status | result')
         print('       身份钩子: idevent <who> <first_climax/say_banned/no_kiss_2turns> | extra <who> | mark <猜的人> <部位> | persona <who> <背德身份>')
         return
     g.save(STATE)

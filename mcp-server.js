@@ -473,7 +473,9 @@ const turnLoop = [
   "Call roll with game_id only; never pass a player name to roll.",
   "Show the full board every turn unless players explicitly say not to.",
   "Read say/hint/task/truth/toll/duel/card/mystery to players and follow action_needed.",
-  "Do not rush. Wait for players to say continue/next/ready before the next roll.",
+  "Do not rush. Present the task in full first, then wait for players to actually do it and say continue/next/ready before the next roll.",
+  "A player choosing 'do the task' (over paying) is the START, not completion — never settle or roll just because they agreed. Your own task you roleplay out; the human's task especially needs real space, do not fast-forward it. Truth: they must actually answer before you roll on.",
+  "On a final_result tie, players may break it: roll with tiebreak=true (adds one more round each, then rolls; pass again if still tied), or accept the tie with a final command from each side.",
   "If a task does not fit the current scene, preserve its strength/core kink and adapt it, or use game_action action=swap.",
   "Never invent dice, tasks, coins, winners, hidden marks, or state. If unsure or error, say so and call game_info query=state.",
 ];
@@ -520,7 +522,7 @@ const newGameHostGuide = [
   "For active identities, follow identity_action_map from monopoly_help; some events happen in conversation and must be reported with game_action.",
   "For feature cards, follow card_rules from monopoly_help; buy/use/discard are all game_action calls.",
   "If history_note says this pair played before and players say that is wrong, stop before rolling. Ask for a unique pair_code or names, then start a new game with that pair_code.",
-  "Every turn: call roll(game_id), paste board, read task/hint/action_needed, wait for players before rolling again.",
+  "Every turn: call roll(game_id), paste board, read the task IN FULL and follow hint/action_needed, then wait for players to actually do it before rolling again — choosing 'do the task' is the start, not completion; do not fast-forward the human's task by rolling right after they agree.",
   "If anyone refuses/stops/says redline/404, use skip or stop immediately; do not argue.",
   "Never invent hidden state. On errors, show the parameter error and retry with corrected args.",
 ];
@@ -538,7 +540,9 @@ const newGameDescription = [
 const rollDescription = [
   "Advance the current turn. Required: game_id from new_game. Do not pass a player name; turn order is automatic.",
   "Optional settlement args only when the previous result asked for them: task=done/skip, toll=pay/serve, super_action=done/buyout, duel_winner=exact player name, guess=大/小, swap_identity=true/false.",
+  "Read the previous task IN FULL and wait for players to actually do it before rolling again. A human choosing 'do the task' (over paying) is the START, not completion — do not settle or roll just because they agreed; rolling settles the previous task as done.",
   "Call roll once per turn and show the returned board to players.",
+  "Tie only: when final_result reports a tie and players want to break it, roll with tiebreak=true (adds one more round each, then rolls). Still tied after? pass tiebreak=true again. Otherwise let each side do a final command and keep the tie.",
 ].join(" ");
 const actionDescription = [
   `Non-roll actions. Required: action and game_id. action must be one of: ${gameActions.join(", ")}.`,
@@ -669,6 +673,7 @@ tool("roll", {
     duel_winner: z.string().optional().describe("Exact winner player name, only when resolving a duel."),
     guess: z.string().optional().describe("Gambler guess before rolling. Allowed: 大 or 小."),
     swap_identity: z.union([z.boolean(), z.string()]).optional().describe("Boolean true/false, only when the previous result offers identity swap."),
+    tiebreak: z.union([z.boolean(), z.string()]).optional().describe("Boolean true, ONLY when final_result reports a tie and players want to break it: adds one extra round each, then rolls. Still tied afterwards? pass it again."),
   },
   annotations: { destructiveHint: false, openWorldHint: true },
 }, ({ game_id, ...body }) => {
@@ -678,6 +683,7 @@ tool("roll", {
   oneOf(body, "super_action", superActions);
   oneOf(body, "guess", guesses);
   booleanParam(body, "swap_identity");
+  booleanParam(body, "tiebreak");
   return request("POST", `/roll/${encodeURIComponent(game_id)}`, body).catch((error) => ({
     ok: false,
     error: error instanceof Error ? error.message : String(error),
@@ -925,7 +931,8 @@ server.registerPrompt("start_spicy_monopoly", {
         "Before new_game, explain the coin/territory win condition, role reversal, safety word 404, skip/swap options, and ask setup/redlines.",
         "Call new_game only after setup is confirmed, with setup_confirmed=true and the rules_ack returned by monopoly_help.",
         "After new_game, read active_limits, history_note, identity_reminder, and board back to the players before the first roll.",
-        "For each turn, call roll(game_id only), show board, follow hint/action_needed, then wait for players before rolling again.",
+        "For each turn, call roll(game_id only), show board, read the task in full and follow hint/action_needed, then wait for players to actually do it before rolling again. Choosing 'do the task' is the start, not completion — do not roll (which settles it) just because they agreed; the human's task especially needs real space.",
+        "On a final_result tie, players may break it with roll tiebreak=true (one more round each), or accept the tie with a final command from each side.",
         "If a player says stop, redline, 404, or does not want a task, call game_action with action='skip' immediately without asking them to justify it.",
         player_names ? `Player/setup notes: ${player_names}` : "",
       ].filter(Boolean).join("\n"),
