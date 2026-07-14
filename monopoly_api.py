@@ -308,6 +308,21 @@ def new_game(req: NewGameRequest):
         _bad = [r for r in req.redline if r not in _VALID_REDLINE]
         if _bad:
             raise HTTPException(422, f"redline 无法识别{_bad}——怕是拼错(安全项不能静默忽略)。合法开关:{sorted(REDLINE_SWITCHES)}；或中文标签/库kink标签")
+    # ★丢局号自救(治「AI丢game_id→反复重开」死循环):这对还有局没打完就明说,别让重开成为唯一出路
+    resume_hint = ""
+    _prev_id = rec.get("last_game_id")
+    if _prev_id and _path(_prev_id).exists():
+        try:
+            _prev_g = Game.load(str(_path(_prev_id)))
+            if not _prev_g.is_over():
+                import time as _t
+                _mins = max(0, int((_t.time() - _path(_prev_id).stat().st_mtime) // 60))
+                _ago = ("%d分钟" % _mins) if _mins < 120 else ("约%d小时" % (_mins // 60))
+                resume_hint = ("⚠️ 这对玩家还有一局没打完:局号 %s(%s前有动静·已掷%d回合)。"
+                               "如果你是丢了局号想继续,别用这局新的——直接拿 %s 去 roll 接着玩;确认要重开才用下面的新局。"
+                               % (_prev_id, _ago, _prev_g.turn_count, _prev_id))
+        except Exception:
+            pass
     game_id = uuid.uuid4().hex[:8]
     g = Game(
         lineup=req.lineup, flavor=req.flavor,
@@ -334,6 +349,7 @@ def new_game(req: NewGameRequest):
             "active_limits": g.safety_summary(),           # ★实际生效的安全设置回显·荷官开局念给人类确认(治「以为禁了其实没设上」)
             "history_note": ("这对玩家(按名字+性别自动认)之前记录了%d局·会自动躲开那些任务、不重复。★若你们其实是第一次玩、却显示玩过=可能跟别人撞名了·换个独特名字、或开局加个暗号(pair_code·比如「你俩的小名」)就能跟别人分开、原名照留。" % prev_games) if prev_games else "这对玩家第一次玩·开始记录(下次同样的名字会自动接上、不重复·不用记token)。",
             "blocked_count": len(rec.get("blocklist", [])),   # ★这对永久拉黑(swap换掉)了几张·撞名/新玩家=0·可念给人类
+            **({"resume_hint": resume_hint} if resume_hint else {}),   # ★上一局没打完的自救提示(丢局号别重开)
             "intro": _INTRO}
 
 
@@ -741,17 +757,28 @@ def list_games(token: Optional[str] = None):
 def peek_history(token: str):
     """看这个玩家记着多少局、多少条任务(跨局记忆)。
     ★注意:在玩的这局要等【下一局开局】才折进 games 池(读它的存档·掉线的局也照折)——
-    所以 tasks_remembered 是【已折进池的往局】·当前这局单列 current_game_tasks·别误读成没记。"""
+    所以 tasks_remembered 是【已折进池的往局】·当前这局单列 current_game_tasks·别误读成没记。
+    ★丢局号找回:返回 last_game_id(这对最近一局)——AI 把 game_id 弄丢时按名字+性别查这里,别重开新局。"""
     rec = _load_token(token)
     recency = rec.get("recency", [])
-    cur_tasks, cur_id = 0, rec.get("last_game_id")
+    cur_tasks, cur_id, cur_open = 0, rec.get("last_game_id"), False
     if cur_id and _path(cur_id).exists():
         try:
-            cur_tasks = len(set(Game.load(str(_path(cur_id))).history))
+            _g = Game.load(str(_path(cur_id)))
+            cur_tasks = len(set(_g.history))
+            cur_open = not _g.is_over()
         except Exception:
             pass
-    return {"games_played": int(rec.get("game_count", 0)), "tasks_remembered": len(recency),
-            "current_game_tasks": cur_tasks, "dedup": "LRU·最久没出优先(不再按固定局数截断)"}
+    else:
+        cur_id = None                          # 局已被删/从没开过·别报一个查不到的号
+    out = {"games_played": int(rec.get("game_count", 0)), "tasks_remembered": len(recency),
+           "current_game_tasks": cur_tasks, "dedup": "LRU·最久没出优先(不再按固定局数截断)"}
+    if cur_id:
+        out["last_game_id"] = cur_id
+        out["last_game_in_progress"] = cur_open
+        if cur_open:
+            out["resume_hint"] = "最近一局 %s 还没打完——丢了局号想继续,就拿它去 roll,别重开新局。" % cur_id
+    return out
 
 
 @app.delete("/seen/{token}")

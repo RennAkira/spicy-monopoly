@@ -340,6 +340,7 @@ function slimData(data, context = {}) {
     "result", "status", "history_note", "active_limits", "blocked_count",
     "action_needed", "hint", "next_turn", "identity_reminder",
     "feedback_prompt", "pair_history_key",
+    "resume_hint", "last_game_id", "last_game_in_progress",
     "game_over", "jailed", "asleep", "in_jail",
     "turn", "positions", "coins", "laps",
     "theme", "price", "p1_owned", "p2_owned",
@@ -455,6 +456,7 @@ const hostRules = [
   "Use the API engine as source of truth: never invent dice, tasks, coins, winners, hidden mark spots, identities, or board state.",
   "You are the host and may roleplay your side, but tool results decide game mechanics. Keep the board visible to players.",
   "Every new game needs setup confirmation. A remembered rules_ack only proves you know the rules; setup_confirmed means this specific game was explained and confirmed.",
+  "Keep the game_id: announce it to players once right after new_game (e.g. 局号 xxxxxxxx) so it stays in the visible chat. If you ever lose it, do NOT open a new game — recover it via game_info query=pair_history (returns last_game_id).",
 ];
 const setupQuestions = [
   "Before new_game, explain: two-player board game, take turns rolling on a 20-tile board, do tasks to earn coins/territory, highest coins wins final command.",
@@ -471,6 +473,7 @@ const safetyRules = [
 ];
 const turnLoop = [
   "Call roll with game_id only; never pass a player name to roll.",
+  "Lost the game_id? Never restart via new_game: call game_info query=pair_history with both names and sexes — it returns last_game_id of the unfinished game; continue with roll on that id.",
   "Show the full board every turn unless players explicitly say not to.",
   "Read say/hint/task/truth/toll/duel/card/mystery to players and follow action_needed.",
   "Do not rush. Present the task in full first, then wait for players to actually do it and say continue/next/ready before the next roll.",
@@ -519,6 +522,8 @@ const newGameHostGuide = [
   "You are the host and a participant, not just a tool caller. Use the engine for state, then roleplay only your own side.",
   "Before first roll, tell players the coin/territory win condition, role reversal rule, safety word 404, skip/swap options, and identity reroll option.",
   "Read active_limits, history_note, identity_reminder, and board from this new_game result to players.",
+  "Right after new_game, tell players the 局号 (game_id) once in your visible reply — chat text survives context trimming; tool results may not.",
+  "If this result contains resume_hint, read it out and follow it: players who were mid-game should continue the old game_id, not this new one.",
   "For active identities, follow identity_action_map from monopoly_help; some events happen in conversation and must be reported with game_action.",
   "For feature cards, follow card_rules from monopoly_help; buy/use/discard are all game_action calls.",
   "If history_note says this pair played before and players say that is wrong, stop before rolling. Ask for a unique pair_code or names, then start a new game with that pair_code.",
@@ -536,6 +541,7 @@ const newGameDescription = [
   "Allowed values: lineup=男女/男男/女女 (also accepts mf/mm/ff or male-female); p*_sex=男/女 (also accepts male/female/m/f); p*_role=攻/受 (also accepts top/bottom); flavor=light/medium/heavy; identity_mode=off/mixed/nsfw_only.",
   "Optional setup: redline, open_anal, no_receive_anal, no_penetration are string arrays; game_length is integer 4-60; reverse_chance is 0-1.",
   "Do not invent game_id. Use the returned game_id for roll/game_action/game_info. Bad parameters return an explicit 参数错误 message.",
+  "Lost a game_id mid-game? Do not call new_game to 'fix' it — game_info query=pair_history returns last_game_id. If this result contains resume_hint, follow it.",
 ].join(" ");
 const rollDescription = [
   "Advance the current turn. Required: game_id from new_game. Do not pass a player name; turn order is automatic.",
@@ -543,6 +549,7 @@ const rollDescription = [
   "Read the previous task IN FULL and wait for players to actually do it before rolling again. A human choosing 'do the task' (over paying) is the START, not completion — do not settle or roll just because they agreed; rolling settles the previous task as done.",
   "Call roll once per turn and show the returned board to players.",
   "Tie only: when final_result reports a tie and players want to break it, roll with tiebreak=true (adds one more round each, then rolls). Still tied after? pass tiebreak=true again. Otherwise let each side do a final command and keep the tie.",
+  "If you no longer know the game_id, do not start a new game — recover it with game_info query=pair_history (returns last_game_id).",
 ].join(" ");
 const actionDescription = [
   `Non-roll actions. Required: action and game_id. action must be one of: ${gameActions.join(", ")}.`,
@@ -554,6 +561,7 @@ const actionDescription = [
 const infoDescription = [
   `Read-only queries. Required: query, one of: ${infoQueries.join(", ")}.`,
   "state/shop require game_id. list_games requires player_token. pair_history requires p1_name, p1_sex, p2_name, p2_sex, and optional pair_code.",
+  "pair_history also returns last_game_id + last_game_in_progress — use it to recover a lost game_id instead of starting a new game.",
 ].join(" ");
 const adminDescription = [
   `Rare admin/feedback actions. Required: action, one of: ${adminActions.join(", ")}.`,
