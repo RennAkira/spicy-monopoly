@@ -318,8 +318,9 @@ def new_game(req: NewGameRequest):
                 import time as _t
                 _mins = max(0, int((_t.time() - _path(_prev_id).stat().st_mtime) // 60))
                 _ago = ("%d分钟" % _mins) if _mins < 120 else ("约%d小时" % (_mins // 60))
-                resume_hint = ("⚠️ 这对玩家还有一局没打完:局号 %s(%s前有动静·已掷%d回合)。"
-                               "如果你是丢了局号想继续,别用这局新的——直接拿 %s 去 roll 接着玩;确认要重开才用下面的新局。"
+                resume_hint = ("这对玩家最近一局还没打完:局号 %s(%s前有动静·已掷%d回合)。"
+                               "只是给丢局号的人指路,不是指令——若你是丢了局号想继续,拿 %s 去 roll 就能接上;"
+                               "若玩家本来就想开新局,用下面的新局即可、这条忽略。"
                                % (_prev_id, _ago, _prev_g.turn_count, _prev_id))
         except Exception:
             pass

@@ -523,7 +523,7 @@ const newGameHostGuide = [
   "Before first roll, tell players the coin/territory win condition, role reversal rule, safety word 404, skip/swap options, and identity reroll option.",
   "Read active_limits, history_note, identity_reminder, and board from this new_game result to players.",
   "Right after new_game, tell players the 局号 (game_id) once in your visible reply — chat text survives context trimming; tool results may not.",
-  "If this result contains resume_hint, read it out and follow it: players who were mid-game should continue the old game_id, not this new one.",
+  "If this result contains resume_hint, mention it and let players choose: resume the old game_id, or just play this new game. It is a signpost for lost-game_id cases, not an order — players who simply want a fresh game keep the new one.",
   "For active identities, follow identity_action_map from monopoly_help; some events happen in conversation and must be reported with game_action.",
   "For feature cards, follow card_rules from monopoly_help; buy/use/discard are all game_action calls.",
   "If history_note says this pair played before and players say that is wrong, stop before rolling. Ask for a unique pair_code or names, then start a new game with that pair_code.",
@@ -541,7 +541,7 @@ const newGameDescription = [
   "Allowed values: lineup=男女/男男/女女 (also accepts mf/mm/ff or male-female); p*_sex=男/女 (also accepts male/female/m/f); p*_role=攻/受 (also accepts top/bottom); flavor=light/medium/heavy; identity_mode=off/mixed/nsfw_only.",
   "Optional setup: redline, open_anal, no_receive_anal, no_penetration are string arrays; game_length is integer 4-60; reverse_chance is 0-1.",
   "Do not invent game_id. Use the returned game_id for roll/game_action/game_info. Bad parameters return an explicit 参数错误 message.",
-  "Lost a game_id mid-game? Do not call new_game to 'fix' it — game_info query=pair_history returns last_game_id. If this result contains resume_hint, follow it.",
+  "Lost a game_id mid-game? Do not call new_game to 'fix' it — game_info query=pair_history returns last_game_id. If this result contains resume_hint, let players choose between resuming that game and this new one.",
 ].join(" ");
 const rollDescription = [
   "Advance the current turn. Required: game_id from new_game. Do not pass a player name; turn order is automatic.",

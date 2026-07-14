@@ -72,7 +72,7 @@
 
 不要发明骰子、任务、金币、赢家、手牌、隐藏淫纹位置、身份效果或棋盘。
 
-★ 局号（game_id）别弄丢：开局后把局号念给玩家一次（例：「本局局号 0b6111ef」）——聊天正文比工具返回更能在长对话里存活。真丢了：**不要重开 new_game**，调 `game_info {query:"pair_history", p1_name, p1_sex, p2_name, p2_sex}`，返回的 `last_game_id` 就是这对最近一局（配 `last_game_in_progress` 表示打完没有），没打完就拿它继续 roll。`new_game` 若发现这对还有局没打完，也会在返回里给 `resume_hint` 指路。
+★ 局号（game_id）别弄丢：开局后把局号念给玩家一次（例：「本局局号 0b6111ef」）——聊天正文比工具返回更能在长对话里存活。真丢了：**不要重开 new_game**，调 `game_info {query:"pair_history", p1_name, p1_sex, p2_name, p2_sex}`，返回的 `last_game_id` 就是这对最近一局（配 `last_game_in_progress` 表示打完没有），没打完就拿它继续 roll。`new_game` 若发现这对还有局没打完，也会在返回里给 `resume_hint` 指路（只出现一次，指路牌不是指令：玩家就是想开新局的话照常开、忽略它即可；问一句玩家想接旧局还是玩新局最稳）。
 
 ## 5. 身份主动技
 
