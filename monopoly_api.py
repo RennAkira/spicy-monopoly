@@ -112,7 +112,7 @@ def _path(game_id: str) -> Path:
 def _load(game_id: str) -> Game:
     p = _path(game_id)
     if not p.exists():
-        raise HTTPException(404, f"游戏 {game_id} 不存在")
+        raise HTTPException(404, f"游戏 {game_id} 不存在。★game_id 必须用开局 POST /new_game 返回的那串(8 位十六进制,例 5255064c)——别拿名字/时间戳/占位符自己拼造。丢了就带 player_token 调 GET /games 找回正在进行的局(别重开新局);确实没有再重新开局。")
     return Game.load(str(p))
 
 def _save(game_id: str, g: Game):

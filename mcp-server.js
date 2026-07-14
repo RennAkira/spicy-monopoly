@@ -733,7 +733,7 @@ tool("game_action", {
   oneOf(args, "action", gameActions, { required: true });
   const game = encodeURIComponent(required(args, "game_id"));
   const player = () => encodeURIComponent(required(args, "who"));
-  switch (args.action) {
+  const dispatch = () => { switch (args.action) {
     case "final_result":
       return request("GET", `/final_result/${game}`);
     case "skip":
@@ -771,7 +771,17 @@ tool("game_action", {
       return request("POST", `/id_event/${game}/${player()}/${encodeURIComponent(required(args, "event"))}`);
     default:
       throw new Error(`Unsupported action: ${args.action}`);
-  }
+  } };
+  return dispatch().catch((error) => {
+    const msg = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      error: msg,
+      action_needed: /HTTP 404/.test(msg)
+        ? "该 game_id 查无此局。用开局 new_game 返回的真 game_id(一串 8 位十六进制,如 5255064c);丢了就用 game_info query=list_games(带 player_token)找回正在进行的局,别自己拼造 id、别重开新局。"
+        : "先按 error 里的说明修正参数再重试;别一报错就重开新局。",
+    };
+  });
 });
 
 tool("game_info", {
