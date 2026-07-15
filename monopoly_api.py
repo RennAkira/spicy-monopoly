@@ -391,23 +391,11 @@ def roll(game_id: str, body: Optional[RollRequest] = None):
     def _add(res):
         nonlocal settled
         if res: settled = res if settled is None else settled + " ｜ " + res
-    # ⓪ 悬着的对决必须先报赢家——赌注不许蒸发
-    if g.pending_duel:
-        if not b.duel_winner:
-            raise HTTPException(400, f"上一轮的对决还没报赢家:body 里带 duel_winner(\"{g.p1}\"或\"{g.p2}\")再掷,或先调 POST /duel_result")
-        _add(g.duel_result(b.duel_winner))
-    # ① 悬着的过路费:默认自动交钱(白嫖之路封死);做了地主差遣的传 toll="serve" 抵扣
-    _add(g.settle_pending_toll(mode=b.toll or "pay"))
-    # ② 悬着的任务:默认照做给币;task="skip"跳过;super_action="buyout"花8币不做
-    for pw in list(g.pending_task):
-        is_super = g.pending_task[pw].get("super")
-        if is_super and b.super_action == "buyout":
-            _add(g.buyout(pw))
-        elif (not is_super) and b.task == "skip":
-            g.pending_task.pop(pw, None)
-            _add(f"⏭️ {pw} 跳过上一道(不给币不占地)")
-        else:
-            _add(g.done(pw))
+    # ⓪①② 懒结算:把上一轮悬着的账(对决→过路费→任务)一次结清·走引擎 settle_prev_round(CLI 同一个方法·单一真相源)
+    try:
+        _add(g.settle_prev_round(toll=b.toll, task=b.task, super_action=b.super_action, duel_winner=b.duel_winner))
+    except ValueError:
+        raise HTTPException(400, f"上一轮的对决还没报赢家:body 里带 duel_winner(\"{g.p1}\"或\"{g.p2}\")再掷,或先调 POST /duel_result")
     # ②b ⚔️平局加掷决胜:满回合且平手时·带 tiebreak 延长一轮(引擎 add_tiebreak 已内含「非平局/没打满不加」的闸)
     #     加成后 is_over() 变 False → 下面 g.roll() 自然掷出决胜这一轮;非平局则 g 仍 over → g.roll() 照常返回 game_over(say 里说明谁赢)
     if b.tiebreak and g.is_over():

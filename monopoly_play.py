@@ -1328,10 +1328,50 @@ class Game:
         self.coins[who] -= fee; self.coins[landlord] += fee
         return f"💰 {who} 补交 {fee} 币过路费给 {landlord},剩{self.coins[who]}币"
 
+    def settle_prev_round(self, toll="pay", task="done", super_action="done", duel_winner=None):
+        """★懒结算·单一真相源(API 和 CLI 共用):掷下一轮前,把上一轮悬着的账
+        (⓪对决 → ①过路费 → ②任务/超级)一次结清。返回结算文案(None=上一轮没悬账)。
+        决定全可选,默认「过路费交钱·任务照做·超级照做」:
+          toll="pay"|"serve"(做了地主差遣不收钱) · task="done"|"skip" · super_action="done"|"buyout"。
+        悬着的对决没报赢家 → 抛 ValueError(上层各自转成「先报赢家」的提示)。"""
+        notes = []
+        def _add(res):
+            if res:
+                notes.append(res)
+        # ⓪ 悬着的对决必须先报赢家——赌注不许蒸发
+        if self.pending_duel:
+            if not duel_winner:
+                raise ValueError("上一轮的对决还没报赢家")
+            _add(self.duel_result(duel_winner))
+        # ① 悬着的过路费:默认自动交钱(白嫖之路封死);做了地主差遣的用 toll="serve" 抵扣
+        _add(self.settle_pending_toll(mode=toll or "pay"))
+        # ② 悬着的任务:默认照做给币;task="skip"跳过;super_action="buyout"花8币不做
+        for pw in list(self.pending_task):
+            is_super = self.pending_task[pw].get("super")
+            if is_super and super_action == "buyout":
+                _add(self.buyout(pw))
+            elif (not is_super) and task == "skip":
+                self.pending_task.pop(pw, None)
+                _add(f"⏭️ {pw} 跳过上一道(不给币不占地)")
+            else:
+                _add(self.done(pw))
+        return " ｜ ".join(notes) if notes else None
+
+    def _hand_err(self, who, card_index, hand):
+        # 功能卡序号错/不在这人手上:讲清为什么(玩家反馈「报错不解释、要翻源码才懂」)。
+        # 通用文案(CLI/MCP 都吃)·不写死某端语法·只点破「手牌按持有人分开、要用别人的得指明那个人」。
+        if not hand:
+            return (f"❌ {who} 手里没有功能卡(手牌空)——功能卡要踩🛒商店格摸卡、或机会格抽到才有。"
+                    f"功能卡按持有人分开记:要用另一个人的牌,得指明那个人(不是只有「刚掷骰那人」才能出牌)。")
+        lst = "、".join(f"[{i}]{c['name']}" for i, c in enumerate(hand))
+        return (f"❌ {who} 没有序号 {card_index} 这张手牌(序号从 0 起·{who} 现有 {len(hand)} 张:{lst})。"
+                f"这查的是【{who}】的手牌——要用另一个人的,得指明那个人。")
+
     def use_card(self, who, card_index):
-        if card_index >= len(self.hand[who]):
-            return f"❌ 没有第{card_index+1}张手牌"
-        card = self.hand[who].pop(card_index)
+        hand = self.hand.get(who, [])
+        if card_index < 0 or card_index >= len(hand):
+            return self._hand_err(who, card_index, hand)
+        card = hand.pop(card_index)
         effect = card["effect"]
         opp = self._opponent(who)
         result = f"🃏 {who} 使用 {card['name']}: {card['description']}"
@@ -1382,9 +1422,10 @@ class Game:
         return result
 
     def discard(self, who, card_index):
-        if card_index >= len(self.hand[who]):
-            return f"❌ 没有第{card_index+1}张手牌"
-        card = self.hand[who].pop(card_index)
+        hand = self.hand.get(who, [])
+        if card_index < 0 or card_index >= len(hand):
+            return self._hand_err(who, card_index, hand)
+        card = hand.pop(card_index)
         return f"🗑️ {who} 弃掉 {card['name']}"
 
     def duel_result(self, winner, stake=DUEL_STAKE):
@@ -1639,19 +1680,17 @@ def _cli():
     actor = next(iter(g.pending_task), g._opponent(g.turn))   # 刚掷骰/待结算的人
 
     if cmd == "swap":
-        # 💱换任务:刚那道不想要就换(赔对方1币·没币白工·每局3次)。CLI是即时结算的·引擎自动回滚刚结的账再换。swap [名字] 可指定谁换。
+        # 💱换任务:刚那道不想要就换(赔对方1币·没币白工·每局3次)。懒结算:换来的新任务悬着·陪 ta 玩完下一次 roll 自动结算。swap [名字] 可指定谁换。
         sw_who = args[1] if len(args) > 1 else actor
         r = g.swap_task(sw_who)
         print(r["result"])
         if r.get("task"):
             print(json.dumps(r["task"], ensure_ascii=False, indent=1))
-            if g.pending_task.get(sw_who):
-                print(g.done(sw_who))     # CLI哲学:即时结算换来的新任务(做了/答了就算)
         g.save(STATE)
         return
 
     if cmd == "skip":
-        # ⏭️ 跳过刚那道任务/真心话:不做、不给币不占地(软404)。CLI即时结算·引擎自动回滚刚结的账。skip [名字] 可指定谁跳。
+        # ⏭️ 跳过刚那道任务/真心话:不做、不给币不占地(软404)。懒结算:直接把悬着那道丢掉(若已 done 提前结算过·引擎自动回滚)。skip [名字] 可指定谁跳。
         sk_who = args[1] if len(args) > 1 else actor
         print(g.skip_task(sk_who)["result"])
         g.save(STATE)
@@ -1660,9 +1699,18 @@ def _cli():
     if cmd == "roll":
         rest = args[1:]
         want_tb = any(a in ("tiebreak", "决胜", "加掷") for a in rest)   # 平局加掷决胜:满回合平手时延长一轮再掷
+        # ★懒结算(跟 API 同一套 settle_prev_round·单一真相源):掷这轮前,先把上一题结清。
+        #   过路费/超级/换/跳=玩家已在掷骰前用 pay/serve/buyout/swap/skip 命令处理过了·这里只兜底默认「交钱·照做」。
+        try:
+            _settled = g.settle_prev_round()
+        except ValueError:
+            print("⚔️ 上一轮的对决还没报赢家,先敲: python monopoly_play.py duel <赢家名>"); return
+        if _settled:
+            print("〔上一题结算〕" + _settled)
+        # 结完账再判是否结束(最后一题也结进去了,才能按最终币数比赢家/判平局)
         if g.is_over():
             if not want_tb:
-                print("🏁 游戏已结束。"); print(g.final_result()); return
+                print("🏁 游戏结束。"); print(g.final_result()); g.save(STATE); return
             tb = g.add_tiebreak(); print(tb["say"]); g.save(STATE)
             if not tb["ok"]:
                 return                                   # 非平局/没打满:add_tiebreak 已说明·别再掷
@@ -1672,37 +1720,39 @@ def _cli():
         r = g.roll(guess=guess, swap_identity=swap_id)
         print(r["say"]); print(r["board"])
         t = r.get("task")
+        # ★懒结算:任务/真心话这轮【不结算】——念出来、等人真做完/答完,再敲下一次 roll(开头自动结算上一题)。
         if r.get("duel"):
             print(f"⚔️ 对决:{t['内容']}" if t else "⚔️ 对决")
-            print("→ 双方撩完,敲: python monopoly_play.py duel <赢家名>")
+            print("→ 双方撩完,敲: python monopoly_play.py duel <赢家名>(报完赢家才能掷下一轮)")
         elif r.get("jailed"):
             if t: print(f"🔒 {r['who']} 被绑,任对方处置:{t['内容']}")
         elif r.get("toll"):
             print(f"🚩 踩进 {r['toll']['landlord']} 的地盘。差遣:{t['内容'] if t else ''}")
-            print(f"→ 交 {r['toll']['fee']} 币过路费敲: pay  /  或直接做这个差遣")
+            print(f"→ 交 {r['toll']['fee']} 币过路费敲: pay  /  做地主这道差遣抵扣敲: serve  /  都不管下轮 roll 默认自动交钱")
         elif t and "buyout" in t:
             print(f"🔥 超级任务:{t['内容']}")
-            print("→ 做完敲: done  /  不做花8币敲: buyout")
+            print("→ 真做完了敲下一次 roll 自动结算(+5币) / 不做花8币敲: buyout")
         elif t:
             print(f"🎯 任务:{t['内容']}")
-            print(g.done(r["who"]))     # 普通任务自动结算(给币+占地)
+            print("→ 陪 ta 真做完/演完,再敲下一次 roll(自动结算上一题·+币+占地)。嫌弃可 swap 换、不做可 skip。")
         if r.get("truth"):
             print(f"💬 真心话:{r['truth']['内容']}")
             if g.pending_task.get(r["who"], {}).get("truth"):
-                print(g.done(r["who"]))     # 答了就是做了:真心话按强度给币(CLI即时结算·expose的强制真心话不给币不进这)
+                print("→ 等 ta 答了,再敲下一次 roll(自动按强度给币)。")
         if r["tile"] == "shop": print("→ 想花3币摸卡敲: buy")
         g.save(STATE)
         if g.is_over():
-            print("\n🏁 满回合,游戏结束!"); print(g.final_result())
+            print("\n🏁 满回合!做完/答完这最后一题,再敲一次 roll 结算并看结果(result)。")
         return
 
     if cmd == "done":      print(g.done(actor))
     elif cmd == "buyout":  print(g.buyout(actor))
     elif cmd == "buy":     print(g.buy_card(actor))
     elif cmd == "pay":     print(g.pay_toll(actor))
+    elif cmd == "serve":   print(g.settle_pending_toll("serve") or "❌ 没有悬着的过路费可用差遣抵扣")   # 做了地主差遣抵过路费·不收钱
     elif cmd == "duel":    print(g.duel_result(args[1]))
-    elif cmd == "card":    print(g.use_card(actor, int(args[1])))
-    elif cmd == "discard": print(g.discard(actor, int(args[1])))
+    elif cmd == "card":    print(g.use_card(args[2] if len(args) > 2 else actor, int(args[1])))   # card <序号> [名字]:默认刚掷骰那人·想用别人的手牌就填名字
+    elif cmd == "discard": print(g.discard(args[2] if len(args) > 2 else actor, int(args[1])))    # discard <序号> [名字]
     elif cmd == "status":  print(g.status()); print(g.board_art())
     elif cmd == "result":  print(g.final_result())
     elif cmd == "idevent": print(g.id_event(args[1], args[2]))
@@ -1714,7 +1764,8 @@ def _cli():
     elif cmd == "reroll_id": print(g.reroll_identity(args[1]))
     else:
         print('命令: new "名:性别:攻受" "名:性别:攻受" [强度] [反转] [回合数] [红线] [开肛=名字] [纯top=名字] [身份=off/mixed/nsfw_only] [先手=名字]')
-        print('       roll [大/小] [换身份] [tiebreak=平局加掷决胜] | done | skip | swap | buyout | buy | pay | duel <赢家> | card <序号> | discard <序号> | reroll_id <名字> | status | result')
+        print('       roll [大/小] [换身份] [tiebreak=平局加掷决胜] | done | skip | swap | buyout | buy | pay | serve | duel <赢家> | card <序号> [名字] | discard <序号> [名字] | reroll_id <名字> | status | result')
+        print('       ★懒结算:roll 只发任务不立即结算·陪 ta 真做完/答完再敲下一次 roll(开头自动结上一题+币+占地)。中途 done=提前结算 / swap=换 / skip=跳 / pay|serve=过路费。')
         print('       身份钩子: idevent <who> <first_climax/say_banned/no_kiss_2turns> | extra <who> | mark <猜的人> <部位> | persona <who> <背德身份>')
         return
     g.save(STATE)
