@@ -93,6 +93,30 @@ IDENTITY_POOL = _load_json("monopoly-identities.json", [
 ])
 
 CURVES = {"light": (1, 3), "medium": (2, 5), "heavy": (3, 6)}
+# 强度尺 1-6·每级碰到身体哪一步(跟库 _meta.强度标准「主尺」同口径)。开局念给人类=知情同意:让 ta 清楚这局大概玩到哪一步。
+INTENSITY_SCALE = {
+    1: "只挑逗、不碰身体(骚话/展示/对视/隔空撩)",
+    2: "碰身体但不碰性器(亲摸咬舔脖子/腰/腿/臀·隔衣蹭)",
+    3: "碰性器外部、不进入(揉摸乳头·隔内裤碰·点到即止轻舔)",
+    4: "口手成套服务或进入准备(口交/手活/乳交/扩张润滑/抵着入口磨)",
+    5: "插入(手指/玩具/鸡巴进入·骑乘/抽插)",
+    6: "失控层(强制/连续高潮·边缘到极限·多点同时)",
+}
+_FLAVOR_CN = {"light": "轻", "medium": "中", "heavy": "重"}
+_FLAVOR_TAIL = {
+    "light": "最重到「碰性器外部」·不含口交、不含插入(调情/爱抚级)",
+    "medium": "含口手服务到插入·插入是下半场才开、结尾附近最烈",
+    "heavy": "每道都在高段、没有轻任务·会玩到失控层(强制/连续高潮)",
+}
+
+def flavor_intensity_note(flavor):
+    """开局念给人类的『这局强度到哪一步』——单一真相源(CLI 回显 + API new_game 返回都用它)。"""
+    if flavor not in CURVES:
+        return ""
+    lo, hi = CURVES[flavor]
+    steps = " → ".join(f"{i}:{INTENSITY_SCALE[i]}" for i in range(lo, hi + 1))
+    return (f"{_FLAVOR_CN[flavor]}档=强度 {lo}-{hi}:{steps}。"
+            f"{_FLAVOR_TAIL[flavor]};前 2 回合有热身、从低段起步逐步升温。想更轻/更狠可换档(light/medium/heavy)。")
 LEVEL_NAME = {1: "触电", 2: "撩", 3: "碰", 4: "口手", 5: "做", 6: "失控"}   # 新强度标准:3=碰性器不进入/4=口手成套服务
 
 # 显式红线开关 → 对应 kink 维度(v2 卡的 kink 字段)。开局可传开关词(更直观),也可直传 kink 值。
@@ -1672,6 +1696,7 @@ def _cli():
         _puretop = [n for n, v in g.receive_pen.items() if not v]
         print(f"✅ 开局!{p1[0]}({p1[1]}·{p1[2]}) vs {p2[0]}({p2[1]}·{p2[2]}) · {flavor}盘 · {g.total_rounds}回合 · 反转{reverse}")
         print(f"   🔒 安全(念给人类确认):红线={redline or '无'} · 后庭开={_opened or '两人都关'} · 纯top={_puretop or '无'} · 身份={identity_mode} · 先手={g.turn}")
+        print(f"   🎚️ 强度(念给人类·知情再开):{flavor_intensity_note(flavor)}")
         print(g.board_art())
         print("\n每回合就敲一条: python monopoly_play.py roll")
         return

@@ -337,7 +337,7 @@ function slimData(data, context = {}) {
   const copyKeys = [
     "ok", "error", "msg", "logged", "muted",
     "game_id", "player_token", "who", "dice", "tile", "say", "settled",
-    "result", "status", "history_note", "active_limits", "blocked_count",
+    "result", "status", "history_note", "active_limits", "intensity_note", "blocked_count",
     "action_needed", "hint", "next_turn", "identity_reminder",
     "feedback_prompt", "pair_history_key",
     "resume_hint", "last_game_id", "last_game_in_progress",
@@ -469,7 +469,7 @@ const safetyRules = [
   "Safety word 404: stop immediately, do not ask for justification.",
   "Players may skip any unwanted task for free: game_action action=skip with game_id and who.",
   "Players may swap an unwanted task before the next roll: game_action action=swap with game_id and who; costs 1 coin, limited uses.",
-  "After new_game, read active_limits/history_note/identity_reminder and the board to players before the first roll.",
+  "After new_game, read active_limits/intensity_note/history_note/identity_reminder and the board to players before the first roll. From intensity_note, tell players how far this game goes (e.g. medium reaches penetration) and offer to change the tier (light/medium/heavy).",
 ];
 const turnLoop = [
   "Call roll with game_id only; never pass a player name to roll.",
@@ -521,7 +521,7 @@ const mcpResources = [
 const newGameHostGuide = [
   "You are the host and a participant, not just a tool caller. Use the engine for state, then roleplay only your own side.",
   "Before first roll, tell players the coin/territory win condition, role reversal rule, safety word 404, skip/swap options, and identity reroll option.",
-  "Read active_limits, history_note, identity_reminder, and board from this new_game result to players.",
+  "Read active_limits, intensity_note, history_note, identity_reminder, and board from this new_game result to players. intensity_note says how far this game's intensity goes on the 1-6 scale — read it so players consent knowingly, and offer light/medium/heavy if they want it milder/harder.",
   "Right after new_game, tell players the 局号 (game_id) once in your visible reply — chat text survives context trimming; tool results may not.",
   "If this result contains resume_hint, mention it and let players choose: resume the old game_id, or just play this new game. It is a signpost for lost-game_id cases, not an order — players who simply want a fresh game keep the new one.",
   "For active identities, follow identity_action_map from monopoly_help; some events happen in conversation and must be reported with game_action.",
@@ -586,7 +586,7 @@ tool("monopoly_help", {
   flow: [
     "First explain the game, ask setup/safety questions, then call new_game.",
     `When and only when setup is explained and confirmed, call new_game with setup_confirmed=true and rules_ack="${MCP_RULES_ACK}".`,
-    "Read active_limits, history_note, identity_reminder, and board to players.",
+    "Read active_limits, intensity_note, history_note, identity_reminder, and board to players.",
     "Call roll for each turn. If the previous turn had pending work, pass task/toll/super_action/duel_winner only when the result asks for it.",
     "Use game_action for side actions such as skip, swap, duel_result, cards, identity events, or final_result.",
     "Use game_info for read-only state/shop/list/history queries.",
@@ -938,7 +938,7 @@ server.registerPrompt("start_spicy_monopoly", {
         "First call monopoly_help and follow its host_rules, setup_questions, safety_rules, turn_loop, identity_action_map, card_rules, and action_map. If resources are available, read spicy-monopoly://manual/mcp-host.",
         "Before new_game, explain the coin/territory win condition, role reversal, safety word 404, skip/swap options, and ask setup/redlines.",
         "Call new_game only after setup is confirmed, with setup_confirmed=true and the rules_ack returned by monopoly_help.",
-        "After new_game, read active_limits, history_note, identity_reminder, and board back to the players before the first roll.",
+        "After new_game, read active_limits, intensity_note, history_note, identity_reminder, and board back to the players before the first roll.",
         "For each turn, call roll(game_id only), show board, read the task in full and follow hint/action_needed, then wait for players to actually do it before rolling again. Choosing 'do the task' is the start, not completion — do not roll (which settles it) just because they agreed; the human's task especially needs real space.",
         "On a final_result tie, players may break it with roll tiebreak=true (one more round each), or accept the tie with a final command from each side.",
         "If a player says stop, redline, 404, or does not want a task, call game_action with action='skip' immediately without asking them to justify it.",

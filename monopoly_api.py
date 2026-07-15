@@ -13,7 +13,7 @@ from typing import Optional
 from pathlib import Path
 import json, uuid, hashlib
 
-from monopoly_play import Game, GAMES_CAP, REDLINE_SWITCHES, LIB, _atomic_write, _dedup_last
+from monopoly_play import Game, GAMES_CAP, REDLINE_SWITCHES, LIB, _atomic_write, _dedup_last, flavor_intensity_note
 
 # redline 合法词表(开放加固):开关名 + 中文标签 + 库里真实 kink 标签。
 # 之外的词=八成拼错(想禁"anal"打成"anla"→静默无保护=安全洞)·new_game 直接 422 别静默吞。
@@ -276,7 +276,7 @@ _INTRO = (
     "④ 身份要演进肉里:开局每人发一张身份(带完整扮演要求,看 status;踩🎴会换),它是你整局的人设——猫猫就真的用第三人称、有耳朵尾巴。每轮返回的 identity_reminder 照念一遍,别让人设掉线。抽到实在演不下去的,每人每局可 /reroll_identity 换一次。\n"
     "⑤ 你只需要一条命令:每回合 /roll。特殊情况(对决/过路费/超级任务)看返回里的 action_needed 和 hint 提示;这道不想做调 /skip(白跳不给币);想换一道玩调 /swap(赔对方1币·每人每局3次·没币也能换但做完不给币)。★swap换掉的卡会【永久拉黑】这对玩家、以后再玩也不出这道(skip只是这局不出、不拉黑)。想恢复全部被换掉的·开局传 reset_blocklist:true 洗白。\n"
     "⑥ 金币机制(★开局也要跟人类讲一句·这是胜负核心,别让ta稀里糊涂):这游戏靠金币定胜负——(a)做任务按强度给币(轻1中2狠3超5),(b)路过或正好踩中🏁起点+2币,(c)做完一道任务就白占下那一格=你的『地盘』,对方之后踩进来,要么交过路费(3币)、要么听你差遣做一道任务。打满回合数时金币多的人赢,赢家能命令输家做最后一道『不能拒绝』的终极指令(除红线/404外)。所以每一道任务、每一次踩格都在攒赢面。\n"
-    "⑦ ★开局把返回里的 active_limits(实际生效的红线/后庭/纯top)原样念给人类确认一遍——防「以为禁了其实没设上」。若跟ta刚说的不符,说明参数没传对,重开一局传对再玩。\n"
+    "⑦ ★开局把返回里的 active_limits(实际生效的红线/后庭/纯top)【和 intensity_note(这局强度按1-6尺玩到哪一步)】原样念给人类确认一遍——防「以为禁了其实没设上」·并让 ta 清楚这局强度大概到哪一步(比如 medium 会到插入)、接受还是换档(light更轻/heavy更狠)。知情再开;若跟ta刚说的不符,说明参数没传对,重开一局传对再玩。\n"
     "⑧ 跨局不重复(自动·你啥都不用记):引擎按【两个玩家的名字+性别】自动认这对玩家——同一对玩家用同样的名字开局,就自动躲开你们玩过的任务和身份(优先发最久没出过的·尽量不重样)(改天接着玩也一样,不用记 token)。返回里的 history_note 会告诉你「这对之前玩过几局」——念给人类听;★强烈建议开局就用你们【自己的独特名字】(别照抄示例里的 Alice/Bob——很多人用一样的名字会共享同一份去重记录、互相影响抽卡)。若他们说第一次玩却显示玩过=跟别人撞名了,让他们换个独特名字、或给个暗号(开局传 pair_code)就分开、原名能留。(player_token 只在删局/看局时用,去重不靠它)\n"
     "讲清楚、问好红线,就开始吧。"
 )
@@ -348,6 +348,8 @@ def new_game(req: NewGameRequest):
     return {"game_id": game_id, "player_token": token, "status": g.status(), "board": g.board_art(),
             "identity_reminder": g._identity_reminder(),   # 双方身份浓缩提醒(每轮 roll 也会带)
             "active_limits": g.safety_summary(),           # ★实际生效的安全设置回显·荷官开局念给人类确认(治「以为禁了其实没设上」)
+            "intensity_note": flavor_intensity_note(g.flavor),   # ★这局强度玩到哪一步(1-6尺·按档展开)·开局念给人类=知情同意·接受还是换档
+
             "history_note": ("这对玩家(按名字+性别自动认)之前记录了%d局·会自动躲开那些任务、不重复。★若你们其实是第一次玩、却显示玩过=可能跟别人撞名了·换个独特名字、或开局加个暗号(pair_code·比如「你俩的小名」)就能跟别人分开、原名照留。" % prev_games) if prev_games else "这对玩家第一次玩·开始记录(下次同样的名字会自动接上、不重复·不用记token)。",
             "blocked_count": len(rec.get("blocklist", [])),   # ★这对永久拉黑(swap换掉)了几张·撞名/新玩家=0·可念给人类
             **({"resume_hint": resume_hint} if resume_hint else {}),   # ★上一局没打完的自救提示(丢局号别重开)
