@@ -367,11 +367,23 @@ class Game:
             return pool or IDENTITY_POOL                  # nsfw池空(旧JSON)回落全池,别开天窗
         return IDENTITY_POOL
 
+    def _identity_dead_by_redline(self, ident):
+        """这张身份的金币钩子,挂在被红线禁掉的 kink 上吗?
+        禁了 → base() 会把那类卡全过滤掉、库里一张都抽不到 → 这张身份整局一分钱加不到、
+        人设那句「XX任务你主导」也永远没有对象(空头支票)。实测:禁 bondage 后🪢绳师照发不误、
+        48张绑卡可抽 0 张、kink_coin 触发 0 次。
+        ★只看机器钩子(kink_coin/kink_bonus)指向的 kink——不去猜 persona 文字,免得误伤。"""
+        for e in ident.get("effects", []):
+            if e.get("type") in ("kink_coin", "kink_bonus") and e.get("kink") in self.redline:
+                return True
+        return False
+
     def _assign_identity(self, who):
         pool = self._identity_pool()
         if not pool:                                      # identity_mode=off:不发身份
             self.identity[who] = {}
             return
+        pool = [i for i in pool if not self._identity_dead_by_redline(i)] or pool   # 本命kink被红线禁的别发;全被排掉才回落(不开天窗)
         taken = {v.get("name") for v in self.identity.values() if v}   # 两人别撞同款
         fresh = [i for i in pool if i["name"] not in self._id_avoid and i["name"] not in taken]
         if not fresh:                                     # 软避让:躲不开就只避对方,不饿死
@@ -1055,8 +1067,11 @@ class Game:
             self._chance_swap_offer = None                # 决定过/过期了,清掉
         old = self.pos[who]; new = (old + d) % 20
         passed_start = new < old      # 越过起点(过圈)·+2币要在 say 里播报(静默到账玩家以为算错)
+        lap_gain = 0
         if passed_start:
-            self.lap[who] += 1; self.coins[who] += 2 + (self._id_effect_val(who, "lap_bonus", 0) or 0)
+            # ★播报要用这个真实值,别硬写「+2币」:🧛吸血鬼 lap_bonus 实付3币、say 却说+2(玩家对不上账)
+            lap_gain = 2 + (self._id_effect_val(who, "lap_bonus", 0) or 0)
+            self.lap[who] += 1; self.coins[who] += lap_gain
         self.pos[who] = new
         kind = self.TILES[new]
         out = {"who": who, "dice": d, "tile": kind, "task": None, "mystery": None, "card": None, "truth": None,
@@ -1168,10 +1183,10 @@ class Game:
                     out["say"] = f"🎲 {who} 掷 {d} → 第{new}格 · 🎴抽卡 → {card['name']} | 身份【{cur_id}】才玩了{tenure}轮·默认保留(想换:下一轮换身份时说一声)"   # 换身份后当场刷新提醒(治慢一拍·荷官照旧的演错一轮)
 
         elif kind == "start":
-            out["say"] = f"🎲 {who} 掷 {d} → 🏁起点,+2币(现{self.coins[who]})"
+            out["say"] = f"🎲 {who} 掷 {d} → 🏁起点,+{lap_gain}币(现{self.coins[who]})"
 
         elif kind == "shop":
-            out["say"] = f"🎲 {who} 掷 {d} → 🛒商店:花{CARD_DRAW_COST}币可摸一张功能卡"
+            out["say"] = f"🎲 {who} 掷 {d} → 🛒商店:花{self.card_price(who)}币可摸一张功能卡"   # 报这人的实付价(🐰兔女郎=0)·别硬写基础价
 
         elif kind == "jail":
             jail_msg = self._send_to_jail(who)
@@ -1202,7 +1217,7 @@ class Game:
         else:
             self.turn = self.p2 if who == self.p1 else self.p1
         if passed_start and kind != "start":   # 路过起点(非正好踩中)·播报那+2币(治静默到账)
-            out["say"] += f"　🏁路过起点+2币(现{self.coins[who]})"
+            out["say"] += f"　🏁路过起点+{lap_gain}币(现{self.coins[who]})"
         out["say"] += gamble_note + swap_note   # 🎰赌徒押注结果 + 机会格主动换身份提示 拼在这轮 say 末尾
         out["board"] = self.board_art()
         return out

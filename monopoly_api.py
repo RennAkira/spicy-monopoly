@@ -432,7 +432,7 @@ def roll(game_id: str, body: Optional[RollRequest] = None):
     elif r.get("truth"):   # mystery「暴露」的强制真心话:惩罚·不给币(别照上面那条许愿)
         hint = "🎭暴露:系统抽的真心话·必须答(这是坏运惩罚·不给币)·答完直接 /roll"
     if r.get("tile") == "shop":
-        hint = f"商店格:想花3币摸功能卡调 POST /buy_card/{game_id}/{who}"
+        hint = f"商店格:想花{g.card_price(who)}币摸功能卡调 POST /buy_card/{game_id}/{who}"   # 这人的实付价(🐰兔女郎=0)·别硬写3
     _save(game_id, g)
     return {
         "who": who,
@@ -595,7 +595,7 @@ def buyout(game_id: str, who: str):
 
 @app.post("/buy_card/{game_id}/{who}")
 def buy_card(game_id: str, who: str):
-    """商店格:花3币摸一张功能卡"""
+    """商店格:花币摸一张功能卡(实付价看 GET /shop 的 price_each·🐰兔女郎免费)"""
     g = _load(game_id)
     result = g.buy_card(who)
     _save(game_id, g)
