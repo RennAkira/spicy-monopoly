@@ -68,7 +68,7 @@ CARD_POOL = _load_json("monopoly-cards.json", [
     # 位置 / 对位类
     {"name": "🔙 回退", "effect": {"type": "push_back", "value": 3}, "description": "对手后退3格"},
     {"name": "🔒 入狱", "effect": {"type": "send_jail"}, "description": "送对手进监狱"},
-    {"name": "🔓 出狱", "effect": {"type": "jail_free"}, "description": "免疫一次监狱"},
+    {"name": "🔓 出狱", "effect": {"type": "jail_free"}, "description": "正被关着→当场出狱;没被关→攒着免疫下次进监狱"},
     {"name": "⏩ 加速", "effect": {"type": "double_roll"}, "description": "下一轮再掷一次(连走两回合)"},
     # 金币类
     {"name": "💰 抢劫", "effect": {"type": "steal_coins", "value": 3}, "description": "偷对手3币"},
@@ -1275,7 +1275,9 @@ class Game:
     def buy(self, who=None):
         # 收集物购买——玩法已搁置(改用纯金币系统)。flag 关时直接拦住;翻 True 复活。
         if not COLLECTIBLES_ENABLED:
-            return "🚫 收集物玩法已下线(现用纯金币系统)"
+            # 别只回一句「下线了」把人堵死:指到活着的那条路(🛒格现在卖功能卡)
+            return (f"🚫 收集物玩法已下线(现用纯金币系统)。🛒商店格现在卖的是功能卡:"
+                    f"调 buy_card 花{CARD_DRAW_COST}币随机摸一张")
         who = who or self.turn
         cost = 8
         # Identity cost modifier
@@ -1287,13 +1289,19 @@ class Game:
         self.coins[who] -= cost; item = random.choice(THEMES[self.theme]); self.items[who].append(item)
         return f"🛒 {who} 买【{item}】,花{cost}币,剩{self.coins[who]}币"
 
-    def buy_card(self, who=None, cost=CARD_DRAW_COST):
-        # 花钱主动摸一张功能卡(踩商店格触发,或自己随时调)。
+    def card_price(self, who=None, cost=CARD_DRAW_COST):
+        # 摸一张功能卡对这个人的实际价钱(modify_cost 身份钩子:兔女郎 value=0 → 免费摸卡)。
+        # buy_card 和「查看商店」共用这一个算式——别各写一份、回头报价跟真实扣款漂移。
         who = who or self.turn
-        # modify_cost 身份钩子(兔女郎 value=0 → 免费摸卡):把这条死线接活
         for e in self.identity.get(who, {}).get("effects", []):
             if e.get("type") == "modify_cost":
                 cost = int(cost * e.get("value", 1))
+        return cost
+
+    def buy_card(self, who=None, cost=CARD_DRAW_COST):
+        # 花钱主动摸一张功能卡(踩商店格触发,或自己随时调)。
+        who = who or self.turn
+        cost = self.card_price(who, cost)
         if self.coins[who] < cost:
             return f"❌ {who} 币不够摸卡({self.coins[who]}/{cost})"
         if len(self.hand[who]) >= self.MAX_HAND:
@@ -1420,8 +1428,14 @@ class Game:
             self.double_next[who] = True
             result += " → 下一轮你再掷一次"
         elif etype == "jail_free":
-            self.jail_immune[who] = self.jail_immune.get(who, 0) + 1
-            result += f" → 攒一张免狱(现{self.jail_immune[who]}张·踩监狱潇洒走过)"
+            # 人已经被关着 → 当场放出来(卡名「出狱」承诺的就是这件事)。
+            # 原来只会 +1 免疫:在牢里打出这张牌毫无反应、牌还白扣一张——玩家反馈「出狱卡在手里但没触发」就是这个。
+            if self.jailed.get(who, 0) > 0:
+                self.jailed.pop(who, None)
+                result += " → 🔓当场出狱!镣铐解开,下个回合正常掷骰"
+            else:
+                self.jail_immune[who] = self.jail_immune.get(who, 0) + 1
+                result += f" → 攒一张免狱(现{self.jail_immune[who]}张·下次踩监狱潇洒走过)"
         elif etype == "gamble":
             val = effect.get("value", 3) if isinstance(effect, dict) else 3
             if random.random() < 0.5:

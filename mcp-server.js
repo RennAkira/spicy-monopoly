@@ -343,7 +343,7 @@ function slimData(data, context = {}) {
     "resume_hint", "last_game_id", "last_game_in_progress",
     "game_over", "jailed", "asleep", "in_jail",
     "turn", "positions", "coins", "laps",
-    "theme", "price", "p1_owned", "p2_owned",
+    "theme", "price", "price_each", "how_to_buy", "hands", "collectibles", "p1_owned", "p2_owned",
     "games_played", "tasks_remembered", "current_game_tasks", "dedup",
     "base_url", "flow", "host_guide", "setup_questions", "safety_rules",
     "turn_loop", "action_map", "identity_action_map", "card_rules",
@@ -442,7 +442,7 @@ const superActions = ["done", "buyout"];
 const guesses = ["大", "小"];
 const gameActions = [
   "final_result",
-  "skip", "swap", "done", "pay_toll", "duel_result", "buyout_super",
+  "skip", "swap", "done", "pay_toll", "serve_toll", "duel_result", "buyout_super",
   "buy_card", "use_card", "discard_card", "buy_collectible",
   "reroll_identity", "reroll_task", "extra_task",
   "guess_mark", "declare_persona", "id_event",
@@ -476,6 +476,7 @@ const turnLoop = [
   "Lost the game_id? Never restart via new_game: call game_info query=pair_history with both names and sexes — it returns last_game_id of the unfinished game; continue with roll on that id.",
   "Show the full board every turn unless players explicitly say not to.",
   "Read say/hint/task/truth/toll/duel/card/mystery to players and follow action_needed.",
+  "Toll tile: settle it the moment the player decides — action='pay_toll' (they pay) or action='serve_toll' (they did the landlord's task instead, no coins charged). Do NOT carry that decision to the next roll: if you forget the toll arg there, it silently defaults to pay and takes their coins even though they served.",
   "Do not rush. Present the task in full first, then wait for players to actually do it and say continue/next/ready before the next roll.",
   "A player choosing 'do the task' (over paying) is the START, not completion — never settle or roll just because they agreed. Your own task you roleplay out; the human's task especially needs real space, do not fast-forward it. Truth: they must actually answer before you roll on.",
   "On a final_result tie, players may break it: roll with tiebreak=true (adds one more round each, then rolls; pass again if still tied), or accept the tie with a final command from each side.",
@@ -486,7 +487,7 @@ const actionMap = {
   skip: "game_action {action:'skip', game_id, who}",
   swap: "game_action {action:'swap', game_id, who}",
   done: "game_action {action:'done', game_id, who}",
-  toll: "roll settlement toll='pay' or toll='serve', or game_action action='pay_toll'",
+  toll: "Settle it the moment it is decided: game_action action='pay_toll' (they pay) or action='serve_toll' (they did the landlord's task instead, no coins charged). Deferring to the next roll's toll='pay'/'serve' still works, but if you forget that arg the next roll silently defaults to pay and charges them anyway.",
   duel: "game_action {action:'duel_result', game_id, winner}",
   final: "game_action {action:'final_result', game_id}",
   cards: "game_action action='buy_card'/'use_card'/'discard_card', with who and index when needed",
@@ -510,6 +511,8 @@ const cardRules = [
   "Use a hand card with game_action {action:'use_card', game_id, who, index}. index is 0-based; card name is tolerated, but index is preferred.",
   "Discard with game_action {action:'discard_card', game_id, who, index}, especially if the hand is full or the player does not want that card.",
   "If unsure what cards a player has, call game_info {query:'state', game_id} and inspect status/hand.",
+  "Asked what the shop sells? game_info {query:'shop', game_id} returns the real stock: the whole feature-card pool, the price for each player, their coins and current hands. The shop is never empty — read the pool to them. Buying draws one card at random from that pool, it is not a pick-what-you-want counter.",
+  "🔓 出狱 (jail-free card): if that player is currently jailed, using it frees them on the spot; if they are not jailed, it banks one immunity against the next jail tile.",
 ];
 const mcpResources = [
   "spicy-monopoly://manual/mcp-host",
@@ -546,6 +549,7 @@ const newGameDescription = [
 const rollDescription = [
   "Advance the current turn. Required: game_id from new_game. Do not pass a player name; turn order is automatic.",
   "Optional settlement args only when the previous result asked for them: task=done/skip, toll=pay/serve, super_action=done/buyout, duel_winner=exact player name, guess=大/小, swap_identity=true/false.",
+  "For toll, prefer settling on the spot via game_action pay_toll/serve_toll. A forgotten toll arg here defaults to pay and charges a player who actually did the landlord's task.",
   "Read the previous task IN FULL and wait for players to actually do it before rolling again. A human choosing 'do the task' (over paying) is the START, not completion — do not settle or roll just because they agreed; rolling settles the previous task as done.",
   "Call roll once per turn and show the returned board to players.",
   "Tie only: when final_result reports a tie and players want to break it, roll with tiebreak=true (adds one more round each, then rolls). Still tied after? pass tiebreak=true again. Otherwise let each side do a final command and keep the tie.",
@@ -758,6 +762,8 @@ tool("game_action", {
       return request("POST", `/done/${game}/${player()}`);
     case "pay_toll":
       return request("POST", `/pay_toll/${game}/${player()}`);
+    case "serve_toll":
+      return request("POST", `/serve_toll/${game}/${player()}`);
     case "duel_result":
       return request("POST", `/duel_result/${game}/${encodeURIComponent(required(args, "winner"))}`);
     case "buyout_super":

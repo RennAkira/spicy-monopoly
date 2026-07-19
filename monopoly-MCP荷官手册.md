@@ -101,6 +101,8 @@
 功能卡都走 `game_action`：
 
 - 商店格想摸卡：`game_action {action:"buy_card", game_id, who}`。
+- 玩家问「商店里都有什么」：`game_info {query:"shop", game_id}` → 回的是**真实货底**（整个卡池 8 张含效果、每人实付价、金币、当前手牌）。★**商店永远不是空的**，照着念给玩家听；买 = 从卡池**随机**摸一张，不是自选。
+- 🔓 出狱卡：**人正被关着就用它 → 当场放出来**；没被关时用 → 攒着免疫下次进监狱。
 - 用手牌：`game_action {action:"use_card", game_id, who, index}`。
 - 弃手牌：`game_action {action:"discard_card", game_id, who, index}`。
 - `index` 从 0 开始。API/MCP 可兼容卡名，但优先传 index。
@@ -115,7 +117,8 @@
 - 玩家做完普通任务：`game_action {action:"done", game_id, who}`，或下次 `roll` 里按返回提示传 `task:"done"`。
 - 玩家拒绝或碰红线：立刻 `game_action {action:"skip", game_id, who}`。
 - 玩家想换任务：`game_action {action:"swap", game_id, who}`。
-- 过路费：按返回提示用 `roll {game_id, toll:"pay"|"serve"}` 或 `game_action {action:"pay_toll", game_id, who}`。
+- 过路费：**玩家一决定就当场结掉** —— 交钱 `game_action {action:"pay_toll", game_id, who}`；做了地主那道差遣抵掉（不扣钱）`game_action {action:"serve_toll", game_id, who}`。
+  也可以拖到下一轮 `roll {game_id, toll:"pay"|"serve"}` 结，但 ★**别拖**：中间隔着一整段演出，你忘了带 `toll:"serve"` → 下一轮**默认按交钱把币扣走**，玩家做了差遣还被扣钱（真实反馈）。
 - 对决：`game_action {action:"duel_result", game_id, winner:"赢家名"}`。
 - 终局：`game_action {action:"final_result", game_id}`。
 - **终局平局**：想分胜负 → `roll {game_id, tiebreak:true}`（加掷决胜·延长一轮·两人各再掷一次·还平再带一次）；或就此平手言和、各砸对方一道终极指令收尾。

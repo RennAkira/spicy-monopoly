@@ -418,7 +418,10 @@ def roll(game_id: str, body: Optional[RollRequest] = None):
         hint = "😴睡美人沉睡:这轮被对方处置(需吻醒·不结算金币·醒来已自动+1)·直接继续 /roll"
     elif r.get("toll"):
         action_needed = "toll"
-        hint = f"踩进对方地盘(过路费{r['toll']['fee']}币已挂账):下一轮 /roll 自动交钱·想用差遣抵扣(做地主那道·不扣钱)就 body 带 {{\"toll\":\"serve\"}}·★选『做差遣』是要真把地主那道做/演完再掷·别人一说做就秒结算跳过"
+        hint = (f"踩进对方地盘(过路费{r['toll']['fee']}币已挂账)·两条路:①交钱 POST /pay_toll/{game_id}/{who} "
+                f"②做地主那道差遣抵掉(不扣钱)→ ★做完当场调 POST /serve_toll/{game_id}/{who} 把账结掉,"
+                f"别等到下一轮再补 body {{\"toll\":\"serve\"}}——隔着一整段演出很容易忘,一忘下一轮就默认按①把钱扣了。"
+                f"★选『做差遣』是要真把地主那道做/演完再结·别人一说做就秒结算跳过")
     elif t and "buyout" in t:
         action_needed = "super"
         hint = "超级任务:玩完下一轮 /roll 自动结算(+5币)·不想做下一轮 body 带 {\"super_action\":\"buyout\"}(花8币)·★选『做』是要真做/演完再掷·别人一说做就秒结算跳过"
@@ -480,6 +483,25 @@ def pay_toll(game_id: str, who: str):
     result = g.pay_toll(who)
     _save(game_id, g)
     return {"result": result, "board": g.board_art()}
+
+
+@app.post("/serve_toll/{game_id}/{who}")
+def serve_toll(game_id: str, who: str):
+    """做了地主那道差遣、拿身体抵过路费(不扣钱)——跟 /pay_toll 对称·当场结清这笔账。
+    ★为什么补这个端点:差遣原本【只能】靠「下一轮 /roll body 带 toll=serve」表达,而交钱早有 /pay_toll 当场按。
+      中间隔着一整段角色扮演,荷官记不住那个参数 → 下一轮默认 toll=pay 把钱照扣
+      (玩家反馈:「做完差遣还是会扣金币,角色也同意不扣了,系统还是扣」)。
+      根在「差遣没有当场落账的地方」,不在荷官不听话——所以补的是端点,不是提示词。"""
+    g = _load(game_id)
+    pt = g.pending_toll
+    if not pt:
+        raise HTTPException(400, f"现在没有悬着的过路费(踩进对方地盘那一轮才会挂账)·{who} 不用结这笔。")
+    if pt["who"] != who:
+        raise HTTPException(400, f"这笔过路费是 {pt['who']} 欠 {pt['landlord']} 的,不是 {who} 的"
+                                 f"——按 who={pt['who']} 再调一次。")
+    result = g.settle_pending_toll(mode="serve")
+    _save(game_id, g)
+    return {"result": result, "board": g.board_art(), "coins": dict(g.coins)}
 
 
 @app.post("/reroll_identity/{game_id}/{who}")
@@ -689,19 +711,26 @@ def state(game_id: str):
 
 @app.get("/shop/{game_id}")
 def shop(game_id: str):
-    """查看收集物池(收集物玩法已搁置·下线时返回提示;翻 COLLECTIBLES_ENABLED 复活)"""
+    """查看商店。🛒格的现役玩法=花币随机摸一张功能卡。
+    ★这里原来只报早就下线的「收集物」池(恒回空清单)→荷官一查就跟玩家说「商店空的没什么可买」,
+      把活着的卡片商店整个盖掉了(玩家反馈)。现在照实报卡片商店;收集物只在 flag 翻 True 时才多挂一段。"""
     g = _load(game_id)
-    from monopoly_play import THEMES, COLLECTIBLES_ENABLED
-    if not COLLECTIBLES_ENABLED:
-        return {"status": "🚫 收集物玩法已下线(现用纯金币系统)", "items": []}
-    pool = THEMES.get(g.theme, [])
-    return {
-        "theme": g.theme,
-        "price": 8,
-        "items": pool,
-        "p1_owned": g.items[g.p1],
-        "p2_owned": g.items[g.p2],
+    from monopoly_play import THEMES, COLLECTIBLES_ENABLED, CARD_POOL, CARD_DRAW_COST
+    out = {
+        "status": (f"🛒 商店卖的是功能卡:花{CARD_DRAW_COST}币随机摸一张(摸到哪张看运气·不能自选)。"
+                   f"下面 items 是整个卡池{len(CARD_POOL)}张的全貌,不是货架清单。"),
+        "price": CARD_DRAW_COST,
+        "price_each": {p: g.card_price(p) for p in (g.p1, g.p2)},   # 身份折扣算进去的实付价(兔女郎0币)
+        "items": [{"name": c["name"], "description": c["description"]} for c in CARD_POOL],
+        "coins": dict(g.coins),
+        "hands": {p: [c["name"] for c in g.hand.get(p, [])] for p in (g.p1, g.p2)},
+        "how_to_buy": (f"POST /buy_card/{game_id}/{{名字}}(MCP:game_action action='buy_card')"
+                       f"·手牌上限{g.MAX_HAND}张,满了先弃一张"),
     }
+    if COLLECTIBLES_ENABLED:      # 收集物玩法复活时才挂这段·默认关(别再拿空清单当「商店没货」骗荷官)
+        out["collectibles"] = {"theme": g.theme, "price": 8, "items": THEMES.get(g.theme, []),
+                               "p1_owned": g.items[g.p1], "p2_owned": g.items[g.p2]}
+    return out
 
 
 @app.delete("/game/{game_id}")
