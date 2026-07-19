@@ -192,10 +192,10 @@ MYSTERY_GOOD = [
     {"name": "🎴 摸卡", "effect": "free_card", "desc": "免费摸一张功能卡"},
 ]
 MYSTERY_BAD = [
-    {"name": "🔥 超级任务", "effect": "super_task", "desc": "强度直接5-6 不做交8币"},
+    {"name": "🔥 超级任务", "effect": "super_task", "desc": "比当前强度档再高1-2级(封顶6) 不做交8币"},
     {"name": "💸 罚款", "effect": "fine", "desc": "交3币给对手"},
     {"name": "🔒 入狱", "effect": "go_jail", "desc": "直接进监狱"},
-    {"name": "🎭 暴露", "effect": "expose", "desc": "对手选一个真心话你必须答"},
+    {"name": "🎭 暴露", "effect": "expose", "desc": "抽一道真心话 你必须答(不给币)"},
     {"name": "⏪ 倒退", "effect": "go_back", "desc": "后退5格"},
     {"name": "🫣 羞耻", "effect": "shame_task", "desc": "做一个羞耻展示任务 不能买断"},
 ]
@@ -321,6 +321,7 @@ class Game:
         self.double_next = {}     # 加速卡:谁下一轮再掷一次
         self.jail_immune = {}     # 出狱卡:谁攒了几张免狱
         self.jailed = {}          # 监狱:谁还被关几轮(轮到时被绑任对方处置)
+        self.pending_card = {}    # 手牌满时摸到的卡:先替他留着·腾出位子(弃牌/出牌)就自动收进来
         self.turn_count = 0       # 已进行的回合数(强度升级 + 终局都看它·不看圈数)
         # 局长可选(写死24太长后半段散):总回合数·速玩12/正常18/超长24(默认)。escalate 曲线按它自适应(短局自然爬得陡)。
         self.total_rounds = max(4, min(60, int(game_length))) if game_length else 2 * ROUNDS_PER_PLAYER
@@ -1113,11 +1114,8 @@ class Game:
                     self.coins[who] += 2
                 elif evt["effect"] == "free_card":
                     c = random.choice(CARD_POOL)
-                    if len(self.hand[who]) < self.MAX_HAND:
-                        self.hand[who].append(c)
-                        out["mystery"]["result"] = f"摸到【{c['name']}】"
-                    else:
-                        out["mystery"]["result"] = f"摸到【{c['name']}】但手牌满,先弃一张再收"
+                    _stored, _note = self._offer_card(who, c)
+                    out["mystery"]["result"] = f"摸到【{c['name']}】" + (f"·{_note}" if _note else "")
             else:
                 evt = random.choice(MYSTERY_BAD)
                 out["mystery"] = {"type": "bad", "name": evt["name"], "desc": evt["desc"], "effect": evt["effect"]}
@@ -1149,12 +1147,10 @@ class Game:
         elif kind == "chance":
             # Draw a card + redraw identity
             card = random.choice(CARD_POOL)
-            if len(self.hand[who]) < self.MAX_HAND:
-                self.hand[who].append(card)
-                out["card"] = {"drawn": card["name"], "desc": card["description"], "stored": True}
-            else:
-                out["card"] = {"drawn": card["name"], "desc": card["description"], "stored": False,
-                               "msg": f"手牌已满({self.MAX_HAND}张),弃一张再收"}
+            _stored, _note = self._offer_card(who, card)
+            out["card"] = {"drawn": card["name"], "desc": card["description"], "stored": _stored}
+            if _note:
+                out["card"]["msg"] = _note
             if self.identity_mode == "off":
                 out["say"] = f"🎲 {who} 掷 {d} → 第{new}格 · 🎴抽卡 → {card['name']}"
             else:
@@ -1289,6 +1285,32 @@ class Game:
         self.coins[who] -= cost; item = random.choice(THEMES[self.theme]); self.items[who].append(item)
         return f"🛒 {who} 买【{item}】,花{cost}币,剩{self.coins[who]}币"
 
+    def _offer_card(self, who, card):
+        """发一张功能卡给谁。手牌满 → 先替他留在暂存位(腾出位子就自动收进来),别凭空扔掉。
+        ★原来 ❓未知格好运「摸卡」和 🎴抽卡格 手牌满时都跟玩家说「弃一张再收」,
+          可那张卡只是个局部变量、根本没存下来 → 玩家真去弃牌也永远收不到(空头支票·两处同源)。
+        返回 (是否直接进手牌, 给玩家的说明)。"""
+        if len(self.hand.setdefault(who, [])) < self.MAX_HAND:
+            self.hand[who].append(card)
+            return True, ""
+        held = self.pending_card.setdefault(who, [])
+        if len(held) >= self.MAX_HAND:      # 暂存位也堆满(极罕见):如实说没收住·别再骗第二次
+            return False, f"手牌{self.MAX_HAND}张、暂存{len(held)}张都满了,这张没收住"
+        held.append(card)
+        return False, (f"手牌已满({self.MAX_HAND}张),这张先替你留着"
+                       f"——弃掉或打出一张就自动收进来(暂存{len(held)}张)")
+
+    def _drain_pending_cards(self, who):
+        """腾出位子后把暂存的卡收进手牌(弃牌/出牌后调)。返回收进来的卡名。"""
+        got, held = [], self.pending_card.get(who) or []
+        while held and len(self.hand.setdefault(who, [])) < self.MAX_HAND:
+            c = held.pop(0)
+            self.hand[who].append(c)
+            got.append(c["name"])
+        if not held:
+            self.pending_card.pop(who, None)
+        return got
+
     def card_price(self, who=None, cost=CARD_DRAW_COST):
         # 摸一张功能卡对这个人的实际价钱(modify_cost 身份钩子:兔女郎 value=0 → 免费摸卡)。
         # buy_card 和「查看商店」共用这一个算式——别各写一份、回头报价跟真实扣款漂移。
@@ -1313,7 +1335,17 @@ class Game:
         return f"🎴 {who} {note}摸到【{card['name']}】:{card['description']}(剩{self.coins[who]}币)"
 
     def buyout(self, who=None):
+        # 买断=花8币不做🔥超级任务。★原来这里【谁都能买、什么都能买】:
+        #   ① 手上根本没悬着任务时调它 → 照样扣8币买了个空(真金白银的洞)
+        #   ② 普通任务/🫣羞耻任务(payload 里明写「不能买断」)也拦不住 → 那句承诺等于没有
+        # 收窄到「只有超级任务能买断」——不想做普通任务本来就能免费 skip,不该花这8币。
         who = who or (self.p2 if self.turn == self.p1 else self.p1)
+        pend = self.pending_task.get(who)
+        if not pend:
+            return f"❌ {who} 现在没有悬着的任务,不用买断(别白花8币)"
+        if not pend.get("super"):
+            return (f"❌ 这道不是🔥超级任务,不能花钱买断(🫣羞耻任务尤其明写不能买断)。"
+                    f"不想做就免费跳过(skip),别花这8币。")
         if self.coins[who] < 8:
             return f"❌ {who} 币不够买断({self.coins[who]}), 必须做任务"
         self.coins[who] -= 8
@@ -1457,6 +1489,9 @@ class Game:
         elif etype == "free_item":
             item_result = self.done(who)
             result += f" → {item_result}"
+        got = self._drain_pending_cards(who)      # 打出一张也腾出了位子·把暂存的收进来
+        if got:
+            result += f" ｜ 📥 暂存的【{'】【'.join(got)}】收进手牌"
         return result
 
     def discard(self, who, card_index):
@@ -1464,7 +1499,9 @@ class Game:
         if card_index < 0 or card_index >= len(hand):
             return self._hand_err(who, card_index, hand)
         card = hand.pop(card_index)
-        return f"🗑️ {who} 弃掉 {card['name']}"
+        got = self._drain_pending_cards(who)      # 腾出位子 → 兑现「弃一张就自动收进来」
+        tail = f" → 📥 暂存的【{'】【'.join(got)}】收进手牌" if got else ""
+        return f"🗑️ {who} 弃掉 {card['name']}{tail}"
 
     def duel_result(self, winner, stake=DUEL_STAKE):
         # 同格对决:你俩商议谁先破功(谁输),手动报赢家。赌注=输的任赢家处置一道(赌身体不赌币)。
@@ -1592,6 +1629,7 @@ class Game:
                  "double_next": self.double_next,
                  "jail_immune": self.jail_immune,
                  "jailed": self.jailed,
+                 "pending_card": self.pending_card,
                  "turn_count": self.turn_count,
                  "hand": {k: v for k, v in self.hand.items()},
                  "identity": self.identity,
@@ -1637,6 +1675,7 @@ class Game:
         g.double_next = s.get("double_next", {})
         g.jail_immune = s.get("jail_immune", {})
         g.jailed = s.get("jailed", {})
+        g.pending_card = s.get("pending_card", {})   # 旧档没这字段=空(back-compat)
         g.turn_count = s.get("turn_count", 0)
         g.hand = s.get("hand", {g.p1: [], g.p2: []})
         g.identity = s.get("identity", {})

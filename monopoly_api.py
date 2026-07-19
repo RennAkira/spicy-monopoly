@@ -430,7 +430,7 @@ def roll(game_id: str, body: Optional[RollRequest] = None):
     elif r.get("tile") == "truth":
         hint = "真心话念给玩家·ta答了才算做了(别ta还没答就掷下一轮)·下一轮 /roll 自动按强度给币·不想答下一轮 body 带 {\"task\":\"skip\"}·嫌没意思/有毛病可 POST /swap/{game_id}/{名字} 当场换一道(赔对方1币·每局3次)"
     elif r.get("truth"):   # mystery「暴露」的强制真心话:惩罚·不给币(别照上面那条许愿)
-        hint = "🎭暴露:对手指定的真心话·必须答(这是坏运惩罚·不给币)·答完直接 /roll"
+        hint = "🎭暴露:系统抽的真心话·必须答(这是坏运惩罚·不给币)·答完直接 /roll"
     if r.get("tile") == "shop":
         hint = f"商店格:想花3币摸功能卡调 POST /buy_card/{game_id}/{who}"
     _save(game_id, g)

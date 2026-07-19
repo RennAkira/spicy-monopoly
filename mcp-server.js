@@ -513,6 +513,8 @@ const cardRules = [
   "If unsure what cards a player has, call game_info {query:'state', game_id} and inspect status/hand.",
   "Asked what the shop sells? game_info {query:'shop', game_id} returns the real stock: the whole feature-card pool, the price for each player, their coins and current hands. The shop is never empty — read the pool to them. Buying draws one card at random from that pool, it is not a pick-what-you-want counter.",
   "🔓 出狱 (jail-free card): if that player is currently jailed, using it frees them on the spot; if they are not jailed, it banks one immunity against the next jail tile.",
+  "Hand cap is 3. A card drawn while the hand is full is NOT lost — it is held for that player and slides in automatically as soon as they discard or play one. Read the returned msg; tell them they can free a slot to collect it.",
+  "Buyout (action='buyout_super') only applies to a pending 🔥 super task. It is refused with no charge if there is no pending task, or if the task is an ordinary/🫣shame one — those are skipped for free with action='skip' instead.",
 ];
 const mcpResources = [
   "spicy-monopoly://manual/mcp-host",
